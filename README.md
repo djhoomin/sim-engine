@@ -356,6 +356,16 @@ API client. OpenSky reports when an aircraft was first seen airborne rather than
 time, so departures run late by taxi time and any delay. Aircraft types for seat counts come from
 OpenSky's public aircraft database, the August 2025 snapshot being downloadable without an account.
 
+Departures for September 2025 and January 2026 are pulled into `data/cph/`, which stays out of git
+like the waits. OpenSky has no data at all for 2, 3 and 24 January 2026, so those days are left
+out. `ingest_cph.py seats` joins aircraft to types from OpenSky's aircraft database and seats from
+`data/reference/aircraft_seats.csv`, typical European configurations written for this project. It
+drops freight operators, freighters, business jets and helicopters. About 5% of departures fly
+aircraft missing from the August 2025 database, 670 of them SAS, mostly newer deliveries. Dropping
+them would undercount SAS, so they take their airline's median seats and are marked as imputed.
+That leaves 19,412 passenger departures, 381 a day with about 63,000 seats in September and 285 a
+day with about 47,000 seats in January.
+
 Unlike MSY there are no passenger counts at Kastrup, only waits, and lane staffing is not public.
 So Kastrup cannot calibrate demand the way MSY did. What it can do is test the capacity explanation
 from MSY: given demand from the schedule, which capacity pattern through the day reproduces the

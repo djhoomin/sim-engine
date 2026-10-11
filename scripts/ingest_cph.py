@@ -5,6 +5,8 @@
   schedule  departures from Kastrup (EKCH) per day from the OpenSky Network, which needs an
             OpenSky API client. Pass its credentials.json or set OPENSKY_CLIENT_ID and
             OPENSKY_CLIENT_SECRET. Credentials never go into the repository.
+  seats     join departures to aircraft types from OpenSky's aircraft database and seats from
+            data/reference/aircraft_seats.csv, keeping passenger flights only
 
 The public feed is https://cphwaitingtime.z6.web.core.windows.net/waitingtime.json. It gives
 Terminal 2 and Terminal 3 security waits as bands such as "2-4 min". Kastrup has one central
@@ -25,6 +27,7 @@ departure times here run late by taxi time plus any delay.
 
 import argparse
 import csv
+from collections import Counter
 import json
 import os
 import re
@@ -41,6 +44,8 @@ FEED = "https://cphwaitingtime.z6.web.core.windows.net/waitingtime.json"
 OPENSKY_TOKEN = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
 OPENSKY_DEPARTURES = "https://opensky-network.org/api/flights/departure"
 COPENHAGEN = ZoneInfo("Europe/Copenhagen")
+# Callsign prefixes of freight airlines seen at Kastrup. Passenger types they fly carry no passengers.
+FREIGHT_CALLSIGNS = {"BCS", "DHK", "DHX", "FDX", "UPS", "CLX", "GEC", "BOX", "ABR", "SWN", "NPT", "MSX"}
 FIELDS = ["observed_utc", "delivery_id", "t2_from", "t2_to", "t3_from", "t3_to"]
 # "9-11" until June 2025, "9-11 min" and "14 - 17 min" after.
 BAND = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*(min)?\s*$")
@@ -163,13 +168,71 @@ def schedule(first: str, last: str, out: Path, credentials: Path | None) -> None
                 seen.date().isoformat(), seen.strftime("%H:%M"), f["icao24"],
                 (f.get("callsign") or "").strip(), f.get("estArrivalAirport") or "",
             ])
-        print(f"{day} {len(flights)} departures")
+        # A day with no departures at Kastrup is a gap in OpenSky's data, not a quiet day.
+        print(f"{day} {len(flights)} departures" + ("  WARNING: no data from OpenSky" if not flights else ""))
         day += timedelta(days=1)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["date", "first_seen", "icao24", "callsign", "destination"])
         w.writerows(sorted(rows))
+
+
+def aircraft_types(database: Path, wanted: set[str]) -> dict[str, tuple[str, str]]:
+    """Type code and operator ICAO code for the wanted ICAO24 addresses."""
+    found = {}
+    with open(database, newline="", encoding="utf-8", errors="replace") as f:
+        for r in csv.DictReader(f, quotechar="'"):
+            if r["icao24"] in wanted:
+                found[r["icao24"]] = (r["typecode"].strip().upper(), r["operatorIcao"].strip().upper())
+    return found
+
+
+def seats(departures: list[Path], database: Path, seat_table: Path, out: Path) -> None:
+    """Passenger departures with seats. Freight and non-passenger types are dropped and counted.
+
+    Aircraft missing from the database, mostly newer SAS deliveries, take their airline's median
+    seats over the flights whose type is known, marked `airline_median` in `seats_source`.
+    """
+    with open(seat_table, newline="") as f:
+        table = {r["typecode"]: r for r in csv.DictReader(f)}
+    flights = [r for path in departures for r in csv.DictReader(open(path, newline=""))]
+    types = aircraft_types(database, {r["icao24"] for r in flights})
+    kept, untyped, dropped = [], [], Counter()
+    for r in flights:
+        typecode, operator = types.get(r["icao24"], ("", ""))
+        entry = table.get(typecode)
+        airline = r["callsign"][:3]
+        if airline in FREIGHT_CALLSIGNS:
+            dropped[f"freight operator {airline}"] += 1
+        elif not typecode:
+            untyped.append(r)
+        elif entry is None:
+            dropped[f"type {typecode} not in seat table"] += 1
+        elif entry["seats"] == "0":
+            dropped[f"non-passenger type {typecode}"] += 1
+        else:
+            kept.append([r["date"], r["first_seen"], r["callsign"], typecode, airline, entry["seats"], "type"])
+
+    by_airline: dict[str, list[int]] = {}
+    for row in kept:
+        by_airline.setdefault(row[4], []).append(int(row[5]))
+    for r in untyped:
+        airline = r["callsign"][:3]
+        if airline in by_airline:
+            median = sorted(by_airline[airline])[len(by_airline[airline]) // 2]
+            kept.append([r["date"], r["first_seen"], r["callsign"], "", airline, str(median), "airline_median"])
+        else:
+            dropped[f"no type and no known airline {airline or 'none'}"] += 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["date", "departure", "callsign", "typecode", "airline", "seats", "seats_source"])
+        w.writerows(sorted(kept))
+    imputed = sum(row[6] == "airline_median" for row in kept)
+    print(f"{len(kept)} passenger departures kept of {len(flights)}, {imputed} with seats from the airline median")
+    for reason, n in dropped.most_common(25):
+        print(f"  dropped {n:5d}  {reason}")
 
 
 def main() -> None:
@@ -185,13 +248,20 @@ def main() -> None:
     s.add_argument("last")
     s.add_argument("out", type=Path)
     s.add_argument("--credentials", type=Path)
+    j = sub.add_parser("seats")
+    j.add_argument("out", type=Path)
+    j.add_argument("database", type=Path)
+    j.add_argument("seat_table", type=Path)
+    j.add_argument("departures", type=Path, nargs="+")
     args = parser.parse_args()
     if args.cmd == "history":
         history(args.repo, args.out)
     elif args.cmd == "poll":
         poll(args.out)
-    else:
+    elif args.cmd == "schedule":
         schedule(args.first, args.last, args.out, args.credentials)
+    else:
+        seats(args.departures, args.database, args.seat_table, args.out)
 
 
 if __name__ == "__main__":

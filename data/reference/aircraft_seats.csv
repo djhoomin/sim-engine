@@ -1,0 +1,59 @@
+typecode,seats,aircraft
+A20N,180,Airbus A320neo
+A318,110,Airbus A318
+A319,144,Airbus A319
+A320,174,Airbus A320
+A321,200,Airbus A321
+A21N,200,Airbus A321neo
+A306,0,Airbus A300-600 freighter
+A332,250,Airbus A330-200
+A333,262,Airbus A330-300
+A338,257,Airbus A330-800
+A339,281,Airbus A330-900
+A359,300,Airbus A350-900
+A388,489,Airbus A380-800
+AT72,70,ATR 72-200
+AT75,70,ATR 72-500
+AT76,70,ATR 72-600
+B737,149,Boeing 737-700
+B738,186,Boeing 737-800
+B739,180,Boeing 737-900
+B37M,153,Boeing 737 MAX 7
+B38M,189,Boeing 737 MAX 8
+B39M,178,Boeing 737 MAX 9
+B752,183,Boeing 757-200
+B763,214,Boeing 767-300
+B77L,0,Boeing 777 freighter
+B77W,354,Boeing 777-300ER
+B788,240,Boeing 787-8
+B789,290,Boeing 787-9
+BCS3,145,Airbus A220-300
+CRJ9,90,Bombardier CRJ900
+CRJX,104,Bombardier CRJ1000
+DH8D,78,De Havilland Dash 8-400
+DHC6,19,De Havilland Twin Otter
+E190,100,Embraer E190
+E195,118,Embraer E195
+E290,110,Embraer E190-E2
+E295,132,Embraer E195-E2
+E75L,76,Embraer E175
+E75S,76,Embraer E175
+SF34,34,Saab 340
+C25A,0,business jet
+C25C,0,business jet
+C56X,0,business jet
+C680,0,business jet
+C68A,0,business jet
+CL30,0,business jet
+CL35,0,business jet
+CL60,0,business jet
+E550,0,business jet
+E55P,0,business jet
+F2TH,0,business jet
+GLEX,0,business jet
+GLF5,0,business jet
+GLF6,0,business jet
+H25B,0,business jet
+PC12,0,single turboprop
+EC35,0,helicopter
+EC45,0,helicopter
