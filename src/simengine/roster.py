@@ -39,13 +39,20 @@ def staff_to_load(
 ) -> Roster:
     """Enough servers each hour to keep utilisation at or below the target.
 
-    `offered_load[h]` is the expected busy server time in hour h, in server hours. This is the
-    classic stationary independent period by period heuristic. It ignores queues carried over
-    from the previous hour, which is exactly the kind of thing the simulation is there to expose.
+    `offered_load` is the expected number of busy servers, either one value per hour or several
+    per hour (96 for quarter hours, say). With several, each hour is sized to its busiest
+    interval. That matters when demand climbs or falls steeply inside an hour, since an hourly
+    average then hides a stretch where arrivals outrun capacity. Hours are otherwise treated
+    independently, so any queue carried across an hour boundary is left for the simulation to
+    expose.
     """
+    load = np.asarray(offered_load, dtype=float)
+    if len(load) % HOURS:
+        raise ValueError("offered load needs a whole number of intervals per hour")
+    peak = load.reshape(HOURS, -1).max(axis=1)
     open_from, open_until = open_hours
     return tuple(
         # The tolerance stops float noise such as 2.1 / 0.7 = 3.0000000000000004 adding a server.
-        max(minimum, math.ceil(load / target_utilisation - 1e-9)) if open_from <= h < open_until else 0
-        for h, load in enumerate(np.asarray(offered_load, dtype=float))
+        max(minimum, math.ceil(peak[h] / target_utilisation - 1e-9)) if open_from <= h < open_until else 0
+        for h in range(HOURS)
     )

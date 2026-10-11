@@ -89,12 +89,14 @@ def generate_demand(config: TerminalConfig, streams: Streams) -> Demand:
     )
 
 
-def expected_arrivals_by_hour(config: TerminalConfig) -> np.ndarray:
-    """Expected passengers arriving at the terminal in each hour, straight from the schedule."""
+def expected_arrivals(config: TerminalConfig, interval: float = 60.0) -> np.ndarray:
+    """Expected passengers arriving in each `interval` minutes of the day, from the schedule."""
+    if (24 * 60) % interval:
+        raise ValueError("interval must divide the day evenly")
     shape = (config.showup_mean / config.showup_sd) ** 2
     lead = stats.gamma(shape, scale=config.showup_mean / shape)
-    edges = 60.0 * np.arange(HOURS + 1)
-    expected = np.zeros(HOURS)
+    edges = np.arange(0, 24 * 60 + interval / 2, interval)
+    expected = np.zeros(len(edges) - 1)
     for f in config.schedule:
         # Arriving in [a, b) means a lead time in (departure - b, departure - a].
         cdf = lead.cdf(f.departure - edges)
@@ -102,15 +104,19 @@ def expected_arrivals_by_hour(config: TerminalConfig) -> np.ndarray:
     return expected
 
 
-def offered_load(config: TerminalConfig) -> dict[str, np.ndarray]:
-    """Expected busy server hours per hour of the day at check-in and at security.
+def expected_arrivals_by_hour(config: TerminalConfig) -> np.ndarray:
+    return expected_arrivals(config, 60.0)
 
-    Ignores the few minutes check-in adds before security, which is small next to an hour.
+
+def offered_load(config: TerminalConfig, interval: float = 60.0) -> dict[str, np.ndarray]:
+    """Expected number of busy desks and lanes in each `interval` minutes of the day.
+
+    Ignores the few minutes check-in adds before security, which is small next to an interval.
     """
-    arrivals = expected_arrivals_by_hour(config)
+    arrivals = expected_arrivals(config, interval)
     return {
-        "checkin": arrivals * config.checkin_share * config.checkin_time.mean / 60,
-        "security": arrivals * config.security_time.mean / 60,
+        "checkin": arrivals * config.checkin_share * config.checkin_time.mean / interval,
+        "security": arrivals * config.security_time.mean / interval,
     }
 
 
@@ -237,6 +243,9 @@ def terminal_kpis(config: TerminalConfig, demand: Demand, run: TerminalRun) -> d
     for h in range(HOURS):
         kpis[f"security_queue_h{h:02d}"] = float(queue[h])
         kpis[f"security_wait_h{h:02d}"] = float(wait[h])
+    # Worst over open hours only. Anyone arriving before opening waits for it whatever the roster.
+    open_hours = np.array(as_roster(config.security_lanes)) > 0
+    kpis["security_wait_worst_hour"] = float(wait[open_hours].max())
     return kpis
 
 

@@ -5,9 +5,10 @@ and the reported differences are paired. Both experiment records are saved to ru
 
 Scenarios:
   flatN        N lanes from 03:00 to 21:00, for example flat7
-  loadU        lanes per hour sized to the expected load at utilisation U, for example load0.75
+  loadU        lanes per hour sized to the hour's mean expected load at utilisation U
+  peakU        lanes per hour sized to the busiest 10 minutes of the hour at utilisation U
 
-    uv run python scripts/compare_staffing.py flat7 load0.75 --reps 30
+    uv run python scripts/compare_staffing.py load0.7 peak0.9 --reps 30
 """
 
 import argparse
@@ -24,6 +25,7 @@ KPIS = [
     "security_wait_mean",
     "security_wait_p95",
     "security_queue_peak",
+    "security_wait_worst_hour",
     "time_to_airside_mean",
     "late_share",
     "security_utilisation",
@@ -34,8 +36,10 @@ def roster_for(name: str, config: TerminalConfig) -> Roster:
     if name.startswith("flat"):
         return shift(int(name[4:]), *OPEN)
     if name.startswith("load"):
-        return staff_to_load(offered_load(config)["security"], float(name[4:]), 1, OPEN)
-    raise SystemExit(f"unknown scenario {name!r}, expected flatN or loadU")
+        return staff_to_load(offered_load(config, 60)["security"], float(name[4:]), 1, OPEN)
+    if name.startswith("peak"):
+        return staff_to_load(offered_load(config, 10)["security"], float(name[4:]), 1, OPEN)
+    raise SystemExit(f"unknown scenario {name!r}, expected flatN, loadU or peakU")
 
 
 def fmt(ci) -> str:
@@ -44,11 +48,13 @@ def fmt(ci) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("scenarios", nargs=2, metavar="SCENARIO", default=["flat7", "load0.75"])
+    parser.add_argument("scenarios", nargs="*", metavar="SCENARIO", default=["load0.7", "peak0.9"])
     parser.add_argument("--desks", type=int, default=22)
     parser.add_argument("--reps", type=int, default=30)
     parser.add_argument("--seed", type=int, default=20261011)
     args = parser.parse_args()
+    if len(args.scenarios) != 2:
+        parser.error("give exactly two scenarios")
 
     base = TerminalConfig(
         schedule=synthetic_schedule(),

@@ -172,9 +172,25 @@ each hour to 75% expected utilisation.
 | Peak security queue (pax) | 223 ± 11 | 28 ± 3 | -195 ± 11 |
 
 The load-led roster uses 29% fewer lane hours and nearly removes queueing. The hourly profile
-shows where the heuristic is weak. At 12:00 it drops from 8 lanes to 3 while the 11:00 peak is
-still clearing, and the mean wait that hour rises to 0.9 minutes against well under 0.2 elsewhere.
-The heuristic treats hours as independent and the simulation shows they are not.
+shows where it is weak. At 12:00 it drops from 8 lanes to 3 and the mean wait that hour rises to
+0.9 minutes against well under 0.2 elsewhere.
+
+That dip is not a queue carried over from the peak. The queue at 12:00 is empty. Demand falls
+steeply inside the hour, so in the first ten minutes arrivals run at 114% of three lanes'
+capacity while the hourly average looks comfortable. The fix is to size each hour to its busiest
+ten minutes rather than its mean (`offered_load(config, 10)` fed to `staff_to_load`). At equal
+cost it wins, 30 replications, 95% intervals:
+
+| KPI | Hourly mean at 70% | Busiest 10 min at 90% | Paired difference |
+| --- | --- | --- | --- |
+| Lane hours | 95 | 94 | -1 |
+| Mean security wait (min) | 0.120 ± 0.007 | 0.092 ± 0.005 | -0.027 ± 0.006 |
+| P95 security wait (min) | 0.57 ± 0.04 | 0.41 ± 0.02 | -0.16 ± 0.04 |
+| Worst open hour, mean wait (min) | 1.00 ± 0.16 | 0.42 ± 0.08 | -0.58 ± 0.18 |
+
+A side finding: about 13 passengers a day arrive before security opens at 03:00 and wait for
+it, around 25 minutes on average. No roster during open hours changes that. Only the opening
+time does, which is why the worst-hour KPI covers open hours only.
 
 All service and show-up parameters are plausible placeholders, not calibrated values, so these
 numbers demonstrate the machinery rather than say anything about a real airport.
@@ -187,8 +203,9 @@ fit. The same fit rejects a 5% error in the mean at p below 1e-18.
 
 Next steps, roughly in order:
 
-- A roster heuristic that looks back one hour, or a lag-adjusted offered load, and a comparison
-  against the independent-hours version.
+- Roster constraints that real operations have, such as minimum shift lengths and limits on how
+  many lanes can open or close at once. Both rosters swing hard, the hourly one from 12 lanes at
+  10:00 to 3 at 12:00, which may not be staffable.
 - Real data. A published schedule for a real airport day would replace the synthetic one through
   `load_schedule` with no other change. Show-up profiles and service times are the parameters that
   most need real values.
