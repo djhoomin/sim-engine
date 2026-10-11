@@ -9,6 +9,9 @@ All passengers of a replication are generated up front from their own named stre
 resource exists. Staffing never touches demand, so two staffing scenarios with the same seed see
 the same passengers arriving at the same moments with the same service needs.
 
+Desks and lanes follow hourly rosters. A desk or lane that closes finishes the passenger it is
+serving first.
+
 The day starts and ends empty. That makes this a terminating simulation with no warm-up to
 choose, and it means Little's Law holds exactly on each resource.
 """
@@ -16,10 +19,12 @@ choose, and it means Little's Law holds exactly on each resource.
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy import stats
 
 from .kernel import Simulation
 from .resource import Resource, Visit
 from .rng import Streams
+from .roster import HOURS, Roster, as_roster
 from .schedule import Flight
 
 
@@ -38,8 +43,8 @@ class ServiceTime:
 @dataclass(frozen=True)
 class TerminalConfig:
     schedule: tuple[Flight, ...]
-    checkin_desks: int
-    security_lanes: int
+    checkin_desks: int | Roster
+    security_lanes: int | Roster
     load_factor: float = 0.85
     checkin_share: float = 0.4  # passengers with bags to drop, the rest go straight to security
     showup_mean: float = 110.0  # minutes before departure
@@ -84,6 +89,31 @@ def generate_demand(config: TerminalConfig, streams: Streams) -> Demand:
     )
 
 
+def expected_arrivals_by_hour(config: TerminalConfig) -> np.ndarray:
+    """Expected passengers arriving at the terminal in each hour, straight from the schedule."""
+    shape = (config.showup_mean / config.showup_sd) ** 2
+    lead = stats.gamma(shape, scale=config.showup_mean / shape)
+    edges = 60.0 * np.arange(HOURS + 1)
+    expected = np.zeros(HOURS)
+    for f in config.schedule:
+        # Arriving in [a, b) means a lead time in (departure - b, departure - a].
+        cdf = lead.cdf(f.departure - edges)
+        expected += f.seats * config.load_factor * (cdf[:-1] - cdf[1:])
+    return expected
+
+
+def offered_load(config: TerminalConfig) -> dict[str, np.ndarray]:
+    """Expected busy server hours per hour of the day at check-in and at security.
+
+    Ignores the few minutes check-in adds before security, which is small next to an hour.
+    """
+    arrivals = expected_arrivals_by_hour(config)
+    return {
+        "checkin": arrivals * config.checkin_share * config.checkin_time.mean / 60,
+        "security": arrivals * config.security_time.mean / 60,
+    }
+
+
 @dataclass
 class TerminalRun:
     sim: Simulation
@@ -93,8 +123,14 @@ class TerminalRun:
 
 def simulate_terminal(config: TerminalConfig, demand: Demand) -> TerminalRun:
     sim = Simulation(start=float(demand.arrival.min()))
-    checkin = Resource(sim, "checkin", config.checkin_desks)
-    security = Resource(sim, "security", config.security_lanes)
+    rosters = {"checkin": as_roster(config.checkin_desks), "security": as_roster(config.security_lanes)}
+    first_hour = int(sim.now // 60)
+    checkin = Resource(sim, "checkin", rosters["checkin"][first_hour % HOURS])
+    security = Resource(sim, "security", rosters["security"][first_hour % HOURS])
+    # Capacity changes on the hour through to the end of the day, then holds at the last count.
+    for hour in range(first_hour + 1, HOURS):
+        for resource in (checkin, security):
+            sim.schedule_at(60.0 * hour, resource.set_capacity, rosters[resource.name][hour % HOURS])
 
     def to_security(entity: int) -> None:
         security.submit(entity, demand.security_time[entity])
@@ -111,6 +147,9 @@ def simulate_terminal(config: TerminalConfig, demand: Demand) -> TerminalRun:
     for entity, t in enumerate(demand.arrival.tolist()):
         sim.schedule_at(t, arrive, entity)
     sim.run()
+    stranded = sum(v.depart is None for v in checkin.visits + security.visits)
+    if stranded:
+        raise RuntimeError(f"{stranded} passengers never cleared: the roster closes on a queue")
     return TerminalRun(sim, checkin, security)
 
 
@@ -118,15 +157,35 @@ def _by_entity(visits: list[Visit]) -> list[Visit]:
     return sorted(visits, key=lambda v: v.entity)
 
 
+def _hourly(visits: list[Visit]) -> tuple[np.ndarray, np.ndarray]:
+    """Time-average queue length in each hour, and mean wait of those who joined in that hour.
+
+    Hours nobody joined report a mean wait of zero, since nobody waited.
+    """
+    arrive = np.array([v.arrive for v in visits])
+    start = np.array([v.start for v in visits])
+    lo = 60.0 * np.arange(HOURS)
+    overlap = np.clip(np.minimum(start, lo[:, None] + 60) - np.maximum(arrive, lo[:, None]), 0, None)
+    queue = overlap.sum(axis=1) / 60
+    hour = np.floor(arrive / 60).astype(int)
+    today = (hour >= 0) & (hour < HOURS)
+    joined = np.bincount(hour[today], minlength=HOURS)
+    waited = np.bincount(hour[today], weights=(start - arrive)[today], minlength=HOURS)
+    return queue, np.divide(waited, joined, out=np.zeros(HOURS), where=joined > 0)
+
+
 def terminal_kpis(config: TerminalConfig, demand: Demand, run: TerminalRun) -> dict[str, float]:
-    """Day-level KPIs. Utilisation is over the whole day, first arrival to last departure."""
+    """Day-level KPIs plus hourly security profiles keyed `_hHH`.
+
+    Utilisation is busy time over open desk or lane time, so closed hours do not dilute it.
+    """
     departures = np.array([f.departure for f in config.schedule])
     checkin_wait = np.array([v.wait for v in run.checkin.visits])
     security = _by_entity(run.security.visits)
     security_wait = np.array([v.wait for v in security])
     airside = np.array([v.depart for v in security])
     late = airside > departures[demand.flight] - config.security_cutoff
-    return {
+    kpis = {
         "passengers": float(len(demand)),
         "checkin_wait_mean": float(checkin_wait.mean()),
         "checkin_wait_p95": float(np.percentile(checkin_wait, 95)),
@@ -137,10 +196,17 @@ def terminal_kpis(config: TerminalConfig, demand: Demand, run: TerminalRun) -> d
         "late_share": float(late.mean()),
         "checkin_utilisation": run.checkin.utilisation(),
         "security_utilisation": run.security.utilisation(),
+        "checkin_desk_hours": run.checkin.server_time() / 60,
+        "security_lane_hours": run.security.server_time() / 60,
         "littles_residual": max(
             run.checkin.littles_law_residual(), run.security.littles_law_residual()
         ),
     }
+    queue, wait = _hourly(security)
+    for h in range(HOURS):
+        kpis[f"security_queue_h{h:02d}"] = float(queue[h])
+        kpis[f"security_wait_h{h:02d}"] = float(wait[h])
+    return kpis
 
 
 def terminal_model(config: TerminalConfig, streams: Streams) -> dict[str, float]:

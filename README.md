@@ -147,28 +147,41 @@ The terminal model sits on top of that.
   before any resource exists, so staffing scenarios with the same seed see identical passengers.
   Passengers with bags go through check-in and then security, the rest go straight to security.
   The day starts and ends empty, so there is no warm-up to choose and Little's Law holds exactly.
-- `scripts/compare_staffing.py` runs the two-scenario comparison and saves both experiment
-  records to `runs/`.
+- `roster.py` holds hourly staffing rosters. Desks and lanes change on the hour, and a closing desk
+  or lane finishes its current passenger before it shuts. `staff_to_load` sizes each hour to the
+  expected load at a target utilisation, which `terminal.offered_load` computes straight from the
+  schedule.
+- Hourly KPIs (`security_queue_hHH` and `security_wait_hHH`) sit in every replication record next
+  to the day-level ones.
+- `scripts/compare_staffing.py` runs a two-roster comparison, prints day KPIs with paired
+  differences and the hourly profile, and saves both experiment records to `runs/`.
 
-First result, synthetic day of about 9,100 passengers, 22 check-in desks, 30 replications with
-common random numbers, 95% intervals:
+First result, synthetic day of about 9,100 passengers, security open 03:00 to 21:00, 30
+replications with common random numbers, 95% intervals. Flat is 7 lanes all day. Load-led sizes
+each hour to 75% expected utilisation.
 
-| KPI | 7 lanes | 8 lanes | Paired difference |
+| KPI | Flat 7 | Load-led | Paired difference |
 | --- | --- | --- | --- |
-| Mean security wait (min) | 2.30 ± 0.16 | 0.37 ± 0.05 | -1.94 ± 0.12 |
-| P95 security wait (min) | 11.29 ± 0.68 | 2.55 ± 0.40 | -8.74 ± 0.46 |
-| Peak security queue (pax) | 223 ± 11 | 73 ± 8 | -150 ± 7 |
+| Lane hours | 126.0 | 90.0 | -36.0 |
+| Mean security wait (min) | 2.32 ± 0.16 | 0.15 ± 0.01 | -2.17 ± 0.16 |
+| P95 security wait (min) | 11.31 ± 0.68 | 0.71 ± 0.05 | -10.60 ± 0.67 |
+| Peak security queue (pax) | 223 ± 11 | 28 ± 3 | -195 ± 11 |
 
-The paired interval on the difference is tighter than either scenario's own interval, which is
-common random numbers doing their job. A day-level mean also hides the peaks, which is why the
-P95 and peak queue are reported next to it.
+The load-led roster uses 29% fewer lane hours and nearly removes queueing. The hourly profile
+shows where the heuristic is weak. At 12:00 it drops from 8 lanes to 3 while the 11:00 peak is
+still clearing, and the mean wait that hour rises to 0.9 minutes against well under 0.2 elsewhere.
+The heuristic treats hours as independent and the simulation shows they are not.
+
+All service and show-up parameters are plausible placeholders, not calibrated values, so these
+numbers demonstrate the machinery rather than say anything about a real airport.
 
 Next steps, roughly in order:
 
-- Staffing that varies by hour. Lanes open and close on a roster in reality, and a constant lane
-  count overstates capacity at night and is the wrong decision variable.
-- KPIs by hour, so the morning bank can be read separately from the quiet midday.
-- A validation of the non-stationary arrivals against the M(t)/G/infinity result, where the number
-  in system is Poisson with a known time-varying mean.
+- Validate the non-stationary arrivals against the M(t)/G/infinity result, where the number in
+  system is Poisson with a known time-varying mean. The expected hourly arrivals already match the
+  simulated average, and this would extend that to the queue itself.
+- A roster heuristic that looks back one hour, or a lag-adjusted offered load, and a comparison
+  against the independent-hours version.
 - Real data. A published schedule for a real airport day would replace the synthetic one through
-  `load_schedule` with no other change.
+  `load_schedule` with no other change. Show-up profiles and service times are the parameters that
+  most need real values.

@@ -58,8 +58,8 @@ class TimeWeighted:
 
 class Resource:
     def __init__(self, sim: Simulation, name: str, capacity: int):
-        if capacity < 1:
-            raise ValueError("capacity must be at least 1")
+        if capacity < 0:
+            raise ValueError("capacity cannot be negative")
         self.sim = sim
         self.name = name
         self.capacity = capacity
@@ -70,6 +70,16 @@ class Resource:
         self.in_system = TimeWeighted(sim.now)
         self.in_queue = TimeWeighted(sim.now)
         self.in_service = TimeWeighted(sim.now)
+        self.servers = TimeWeighted(sim.now, capacity)
+
+    def set_capacity(self, capacity: int) -> None:
+        """Open or close servers now. A closing server finishes its current entity first."""
+        if capacity < 0:
+            raise ValueError("capacity cannot be negative")
+        self.capacity = capacity
+        while self.queue and self.busy < self.capacity:
+            self._start(*self.queue.popleft())
+        self._record()
 
     def submit(
         self,
@@ -95,7 +105,7 @@ class Resource:
     def _finish(self, visit: Visit, on_done: Callable[[Visit], None] | None) -> None:
         visit.depart = self.sim.now
         self.busy -= 1
-        if self.queue:
+        if self.queue and self.busy < self.capacity:
             self._start(*self.queue.popleft())
         self._record()
         if on_done is not None:
@@ -106,16 +116,24 @@ class Resource:
         self.in_system.update(now, self.busy + len(self.queue))
         self.in_queue.update(now, len(self.queue))
         self.in_service.update(now, self.busy)
+        # A closing server still finishing its entity is working, so it counts as open.
+        self.servers.update(now, max(self.capacity, self.busy))
 
     def reset_stats(self) -> None:
         """Start a fresh observation window now, for example at the end of warm-up."""
         now = self.sim.now
         self.stats_start = now
-        for acc in (self.in_system, self.in_queue, self.in_service):
+        for acc in (self.in_system, self.in_queue, self.in_service, self.servers):
             acc.reset(now)
 
     def utilisation(self) -> float:
-        return self.in_service.mean(self.sim.now) / self.capacity
+        """Busy server time over open server time, so closed hours do not count as idle."""
+        open_time = self.servers.integral(self.sim.now)
+        return self.in_service.integral(self.sim.now) / open_time if open_time > 0 else 0.0
+
+    def server_time(self) -> float:
+        """Total open server time in the current window, in clock units."""
+        return self.servers.integral(self.sim.now)
 
     def littles_law_residual(self) -> float:
         """Relative gap between the time-average L and the per-visit sojourns in the window.
