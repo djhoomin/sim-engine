@@ -138,5 +138,37 @@ with a precision guard, the engine against the Lindley recursion customer by cus
 Law exactly and statistically, and that common random numbers cut the variance of a scenario
 difference.
 
-Next is the terminal itself: a non-stationary arrival process from a flight schedule, then
-check-in feeding security, then the two-scenario staffing comparison.
+The terminal model sits on top of that.
+
+- `schedule.py` holds the flight schedule. A synthetic short-haul day with three banks is the
+  default, and `load_schedule` reads a real one from CSV with `departure` (HH:MM) and `seats`.
+- `terminal.py` generates passengers from the schedule: binomial load per flight, a gamma show-up
+  lead time before departure, a bag drop choice and lognormal service times. All of it is drawn
+  before any resource exists, so staffing scenarios with the same seed see identical passengers.
+  Passengers with bags go through check-in and then security, the rest go straight to security.
+  The day starts and ends empty, so there is no warm-up to choose and Little's Law holds exactly.
+- `scripts/compare_staffing.py` runs the two-scenario comparison and saves both experiment
+  records to `runs/`.
+
+First result, synthetic day of about 9,100 passengers, 22 check-in desks, 30 replications with
+common random numbers, 95% intervals:
+
+| KPI | 7 lanes | 8 lanes | Paired difference |
+| --- | --- | --- | --- |
+| Mean security wait (min) | 2.30 ± 0.16 | 0.37 ± 0.05 | -1.94 ± 0.12 |
+| P95 security wait (min) | 11.29 ± 0.68 | 2.55 ± 0.40 | -8.74 ± 0.46 |
+| Peak security queue (pax) | 223 ± 11 | 73 ± 8 | -150 ± 7 |
+
+The paired interval on the difference is tighter than either scenario's own interval, which is
+common random numbers doing their job. A day-level mean also hides the peaks, which is why the
+P95 and peak queue are reported next to it.
+
+Next steps, roughly in order:
+
+- Staffing that varies by hour. Lanes open and close on a roster in reality, and a constant lane
+  count overstates capacity at night and is the wrong decision variable.
+- KPIs by hour, so the morning bank can be read separately from the quiet midday.
+- A validation of the non-stationary arrivals against the M(t)/G/infinity result, where the number
+  in system is Poisson with a known time-varying mean.
+- Real data. A published schedule for a real airport day would replace the synthetic one through
+  `load_schedule` with no other change.

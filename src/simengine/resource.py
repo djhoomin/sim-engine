@@ -31,6 +31,7 @@ class TimeWeighted:
 
     def __init__(self, now: float, value: float = 0.0):
         self.value = value
+        self.peak = value
         self.area = 0.0
         self._since = now
         self._start = now
@@ -38,11 +39,13 @@ class TimeWeighted:
     def update(self, now: float, value: float) -> None:
         self.area += self.value * (now - self._since)
         self.value = value
+        self.peak = max(self.peak, value)
         self._since = now
 
     def reset(self, now: float) -> None:
         self.update(now, self.value)
         self.area = 0.0
+        self.peak = self.value
         self._start = now
 
     def integral(self, now: float) -> float:

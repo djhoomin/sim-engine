@@ -6,8 +6,8 @@ from typing import Any, Callable
 
 
 class Simulation:
-    def __init__(self):
-        self.now = 0.0
+    def __init__(self, start: float = 0.0):
+        self.now = start
         self._events: list[tuple[float, int, Callable[..., Any], tuple]] = []
         # Tie-breaker so events at equal times fire in the order they were scheduled.
         self._seq = itertools.count()
