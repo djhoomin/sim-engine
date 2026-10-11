@@ -336,3 +336,27 @@ catch-up with passengers roughly conserved. TSA counts passengers screened, not 
 so a drop in lanes open, at a shift change or for breaks, would hold passengers in the queue and
 push them into the next hour's count. That is a capacity explanation, not a demand one, and these
 data cannot confirm it. Observed waiting times at the same checkpoint could.
+
+### Copenhagen
+
+`scripts/ingest_cph.py history` replays the git-scraped wait history into `data/cph/waits.csv`,
+which stays out of git because the source repository has no licence. It holds 22,990 readings
+from 4 December 2024 to 3 February 2026, one per change, about every 22 minutes. The feed format
+changed on 23 June 2025 from "9-11" to "9-11 min" and both are parsed. Kastrup has one central
+security checkpoint for Terminals 2 and 3, and the two fields have always been equal. They should
+only diverge once the new Terminal 3 building opens with its own security, expected around 2028.
+
+The median wait is 5 minutes, the 90th percentile 13.5 and the maximum 39.5. By Copenhagen hour the
+time-weighted mean wait peaks at 04:00 (9.3 minutes), around 07:00 and 11:00, and at 16:00 to 17:00
+(9.4), and sits near 1 to 2 minutes overnight.
+
+The public feed is still live without a key, so `ingest_cph.py poll` can extend the series from now
+on. Departures come from the OpenSky Network through `ingest_cph.py schedule`, which needs an OpenSky
+API client. OpenSky reports when an aircraft was first seen airborne rather than the scheduled
+time, so departures run late by taxi time and any delay. Aircraft types for seat counts come from
+OpenSky's public aircraft database, the August 2025 snapshot being downloadable without an account.
+
+Unlike MSY there are no passenger counts at Kastrup, only waits, and lane staffing is not public.
+So Kastrup cannot calibrate demand the way MSY did. What it can do is test the capacity explanation
+from MSY: given demand from the schedule, which capacity pattern through the day reproduces the
+observed waits, and is it plausible.
