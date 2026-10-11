@@ -125,3 +125,14 @@ def fit_showup_grouped(
     loglik = _poisson_loglik(observed, expected(result.x))
     fits = tuple(ShowUpFit(float(m), float(s), float(l), float("nan"), len(observed)) for m, s, l in p)
     return GroupedShowUpFit(fits, loglik, len(observed))
+
+
+def fit_scores(observed: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
+    """Error measures for predicted against observed counts."""
+    err = np.asarray(predicted) - np.asarray(observed)
+    return {
+        "rmse": float(np.sqrt(np.mean(err**2))),
+        "mae": float(np.mean(np.abs(err))),
+        "r2": float(1 - np.sum(err**2) / np.sum((observed - np.mean(observed)) ** 2)),
+        "total_error_pct": float(100 * err.sum() / np.sum(observed)),
+    }

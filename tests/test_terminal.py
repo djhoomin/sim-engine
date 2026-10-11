@@ -91,3 +91,10 @@ def test_extra_security_lane_is_resolved_with_common_random_numbers():
     crn_sd = np.std(eight.kpi("security_wait_p95") - seven.kpi("security_wait_p95"), ddof=1)
     indep_sd = np.std(eight_indep.kpi("security_wait_p95") - seven.kpi("security_wait_p95"), ddof=1)
     assert crn_sd < indep_sd
+
+
+def test_everyone_straight_to_security():
+    config = replace(BASE, checkin_share=0.0)
+    kpis = terminal_model(config, Streams(6, 0))
+    assert kpis["checkin_wait_mean"] == 0.0
+    assert kpis["passengers"] == sum(kpis[f"security_screened_h{h:02d}"] for h in range(24))

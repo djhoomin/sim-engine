@@ -42,6 +42,16 @@ class ServiceTime:
 
 
 @dataclass(frozen=True)
+class ShowUpBand:
+    """Show-up behaviour for departures from `from_hour` until the next band starts."""
+
+    from_hour: int
+    mean: float
+    sd: float
+    load_factor: float
+
+
+@dataclass(frozen=True)
 class TerminalConfig:
     schedule: tuple[Flight, ...]
     checkin_desks: int | Roster
@@ -53,6 +63,30 @@ class TerminalConfig:
     checkin_time: ServiceTime = field(default_factory=lambda: ServiceTime(2.5, 0.6))
     security_time: ServiceTime = field(default_factory=lambda: ServiceTime(0.4, 0.5))
     security_cutoff: float = 30.0  # clearing security later than this before departure counts as late
+    # When set, these replace showup_mean, showup_sd and load_factor, chosen by departure hour.
+    showup_bands: tuple[ShowUpBand, ...] = ()
+
+
+def flight_profiles(config: TerminalConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Show-up mean, sd and load factor for each flight in the schedule."""
+    n = len(config.schedule)
+    if not config.showup_bands:
+        return (
+            np.full(n, config.showup_mean),
+            np.full(n, config.showup_sd),
+            np.full(n, config.load_factor),
+        )
+    bands = sorted(config.showup_bands, key=lambda b: b.from_hour)
+    if bands[0].from_hour != 0:
+        raise ValueError("the first show-up band must start at hour 0")
+    starts = [b.from_hour for b in bands]
+    hours = [int(f.departure // 60) % 24 for f in config.schedule]
+    chosen = [bands[np.searchsorted(starts, h, side="right") - 1] for h in hours]
+    return (
+        np.array([b.mean for b in chosen]),
+        np.array([b.sd for b in chosen]),
+        np.array([b.load_factor for b in chosen]),
+    )
 
 
 @dataclass(frozen=True)
@@ -72,12 +106,13 @@ class Demand:
 def generate_demand(config: TerminalConfig, streams: Streams) -> Demand:
     departures = np.array([f.departure for f in config.schedule])
     seats = np.array([f.seats for f in config.schedule])
-    pax = streams.stream("load").binomial(seats, config.load_factor)
+    mean, sd, load = flight_profiles(config)
+    pax = streams.stream("load").binomial(seats, load)
     flight = np.repeat(np.arange(len(seats)), pax)
     n = len(flight)
 
-    shape = (config.showup_mean / config.showup_sd) ** 2
-    lead = streams.stream("showup").gamma(shape, config.showup_mean / shape, n)
+    shape = (mean / sd) ** 2
+    lead = streams.stream("showup").gamma(shape[flight], (mean / shape)[flight], n)
     # Service times are drawn for every passenger, including those who skip check-in, so that
     # changing the check-in share does not shift anyone else's draws.
     order = np.argsort(departures[flight] - lead, kind="stable")
@@ -97,8 +132,12 @@ def expected_arrivals(config: TerminalConfig, interval: float = 60.0) -> np.ndar
     edges = np.arange(0, 24 * 60 + interval / 2, interval)
     departures = np.array([f.departure for f in config.schedule])
     seats = np.array([f.seats for f in config.schedule])
-    unit = expected_showups(departures, seats, edges, config.showup_mean, config.showup_sd)
-    return config.load_factor * unit
+    mean, sd, load = flight_profiles(config)
+    expected = np.zeros(len(edges) - 1)
+    for profile in set(zip(mean, sd, load)):
+        same = (mean == profile[0]) & (sd == profile[1]) & (load == profile[2])
+        expected += profile[2] * expected_showups(departures[same], seats[same], edges, *profile[:2])
+    return expected
 
 
 def expected_arrivals_by_hour(config: TerminalConfig) -> np.ndarray:
@@ -134,6 +173,8 @@ def seat_occupancy(config: TerminalConfig, times: np.ndarray, nodes: int = 64) -
     """
     if config.checkin_share != 0:
         raise ValueError("seat_occupancy assumes everyone goes straight to security")
+    if config.showup_bands:
+        raise ValueError("seat_occupancy assumes one show-up profile for all flights")
     shape = (config.showup_mean / config.showup_sd) ** 2
     lead = stats.gamma(shape, scale=config.showup_mean / shape)
     sigma2 = np.log1p(config.security_time.cv**2)
@@ -214,7 +255,8 @@ def terminal_kpis(config: TerminalConfig, demand: Demand, run: TerminalRun) -> d
     Utilisation is busy time over open desk or lane time, so closed hours do not dilute it.
     """
     departures = np.array([f.departure for f in config.schedule])
-    checkin_wait = np.array([v.wait for v in run.checkin.visits])
+    # With nobody checking in, nobody waited there.
+    checkin_wait = np.array([v.wait for v in run.checkin.visits]) if run.checkin.visits else np.zeros(1)
     security = _by_entity(run.security.visits)
     security_wait = np.array([v.wait for v in security])
     airside = np.array([v.depart for v in security])
@@ -237,7 +279,9 @@ def terminal_kpis(config: TerminalConfig, demand: Demand, run: TerminalRun) -> d
         ),
     }
     queue, wait = _hourly(security)
+    screened = np.histogram(airside, bins=60.0 * np.arange(HOURS + 1))[0]
     for h in range(HOURS):
+        kpis[f"security_screened_h{h:02d}"] = float(screened[h])
         kpis[f"security_queue_h{h:02d}"] = float(queue[h])
         kpis[f"security_wait_h{h:02d}"] = float(wait[h])
     # Worst over open hours only. Anyone arriving before opening waits for it whatever the roster.

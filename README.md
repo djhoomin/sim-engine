@@ -222,6 +222,7 @@ Next steps, roughly in order:
 - Copenhagen waits. Use the Copenhagen wait history as a second check, once a departure schedule
   for those dates is available (see Real data below).
 - Check-in rosters, using the same machinery as security.
+- Real day-to-day variability in demand. See the replay results under Real data.
 
 ## Real data
 
@@ -266,3 +267,40 @@ should not be read as a show-up profile.
 
 What the TSA counts do not settle is waiting time. They count passengers screened, so the fitted
 lead time is time of screening before departure and includes any queue.
+
+### Replaying real days
+
+`scripts/replay_us.py` runs the terminal model on each day of the test week from that day's real
+MSY schedule, with morning and afternoon show-up profiles fitted on the other week. Everyone goes
+straight to security, since the fitted lead time is already time of screening. The checkpoint is
+closed before 03:00 in the roster, so the overnight pile-up at opening comes out of the simulation
+rather than a binning rule. The model's passengers screened per hour are compared with TSA's
+counts. 30 replications per day:
+
+| Day | Observed | Simulated | Hourly R2 | Observed hours inside the model's 95% band |
+| --- | --- | --- | --- | --- |
+| Sun 19 July | 20,354 | 17,097 ± 19 | 0.86 | 10% |
+| Mon 20 July | 17,979 | 18,253 ± 16 | 0.94 | 20% |
+| Tue 21 July | 15,056 | 14,938 ± 19 | 0.90 | 26% |
+| Wed 22 July | 15,135 | 15,733 ± 17 | 0.83 | 5% |
+| Thu 23 July | 17,503 | 18,189 ± 23 | 0.92 | 40% |
+| Fri 24 July | 17,547 | 17,913 ± 19 | 0.91 | 15% |
+| Sat 25 July | 13,762 | 13,603 ± 19 | 0.89 | 21% |
+
+Three findings.
+
+- The hourly shape is right out of sample, with R2 between 0.83 and 0.94 on every day, and daily
+  totals within 4% except Sunday.
+- The model is far too sure of itself. A well calibrated model would have about 95% of observed
+  hours inside its 95% band, and this one manages 5% to 40%. Its only randomness is independent
+  passengers, binomial per seat. Real demand also moves with the day (Sunday's load factor was 0.98
+  against about 0.8 midweek), with each flight, and with groups travelling together. The point
+  forecast is usable, the uncertainty around it is not yet. This matters for staffing, which is
+  decided against the bad days rather than the average one.
+- Every day of both weeks screens far fewer passengers at 10:00 than the departures predict, 431 to
+  902 against 1,000 to 1,300 in the hours either side, with no lull in the schedule to explain it.
+  It could be a TSA shift change, lanes closed for a break or a quirk in how the hour is recorded.
+  The data cannot tell which, and the model should not be bent to fit it until it can.
+
+Waiting times from the replay are what a hypothetical roster would give, since real MSY staffing
+is not public, so they say nothing about MSY.

@@ -17,11 +17,16 @@ class Flight:
     seats: int
 
 
-def load_schedule(path: str | Path) -> tuple[Flight, ...]:
-    """Read a CSV with columns `departure` (HH:MM) and `seats`."""
+def load_schedule(path: str | Path, date: str | None = None) -> tuple[Flight, ...]:
+    """Read a CSV with columns `departure` (HH:MM) and `seats`.
+
+    With `date`, keep only rows whose `date` column matches, for files holding many days.
+    """
     flights = []
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
+            if date is not None and row["date"] != date:
+                continue
             hours, minutes = row["departure"].split(":")
             flights.append(Flight(departure=60 * int(hours) + int(minutes), seats=int(row["seats"])))
     return tuple(sorted(flights, key=lambda fl: fl.departure))
