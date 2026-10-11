@@ -68,6 +68,10 @@ confidently wrong, so the engine should be proved correct against closed-form re
 - **M/M/c via Erlang C**: directly applicable to parallel security lanes and check-in desks, which
   is the first real staffing question the model should be able to answer.
 - **Lindley recursion** as a cross-check for single-server waiting times under general distributions.
+- **M(t)/G/infinity** for the non-stationary arrivals. With unlimited lanes the number at security
+  at time t has a known mean function. Because flight loads here are binomial rather than Poisson,
+  the exact distribution is a sum of binomials, one per seat, with that same mean and a smaller
+  variance than Poisson.
 
 Only once those pass should the model meet real or synthetic operational data.
 
@@ -175,11 +179,14 @@ The heuristic treats hours as independent and the simulation shows they are not.
 All service and show-up parameters are plausible placeholders, not calibrated values, so these
 numbers demonstrate the machinery rather than say anything about a real airport.
 
+The non-stationary arrivals are validated in `tests/test_nonstationary.py`. Over 300
+replications with unlimited lanes, the number at security matches the M(t)/G/infinity mean at
+every quarter hour of the day within a Bonferroni bound, the pooled variance is within 5% of the
+exact value and clearly below Poisson, and the full distribution at the peak passes a chi-square
+fit. The same fit rejects a 5% error in the mean at p below 1e-18.
+
 Next steps, roughly in order:
 
-- Validate the non-stationary arrivals against the M(t)/G/infinity result, where the number in
-  system is Poisson with a known time-varying mean. The expected hourly arrivals already match the
-  simulated average, and this would extend that to the queue itself.
 - A roster heuristic that looks back one hour, or a lag-adjusted offered load, and a comparison
   against the independent-hours version.
 - Real data. A published schedule for a real airport day would replace the synthetic one through

@@ -114,6 +114,37 @@ def offered_load(config: TerminalConfig) -> dict[str, np.ndarray]:
     }
 
 
+def seat_occupancy(config: TerminalConfig, times: np.ndarray, nodes: int = 64) -> np.ndarray:
+    """Probability that a given seat's passenger is at security at each time, with unlimited lanes.
+
+    Returns an array indexed [flight, time]. This is the M(t)/G/infinity result adapted to this
+    model's demand. A seat is filled with probability equal to the load factor, its passenger
+    arrives at departure minus a gamma lead time A, and stays for a service time S. With no queue
+    the passenger is present at t exactly when A <= t < A + S, so the probability is
+    load_factor * E_S[P(t - S < A <= t)], with the expectation over S by Gauss-Hermite quadrature.
+
+    Seats are independent, so the number at security at time t is a sum of binomials with these
+    probabilities. Its mean is the M(t)/G/infinity mean. Its variance is slightly below the Poisson
+    variance, because each flight's passenger count is binomial rather than Poisson.
+
+    Only valid when nobody goes through check-in first, so the check-in share must be zero.
+    """
+    if config.checkin_share != 0:
+        raise ValueError("seat_occupancy assumes everyone goes straight to security")
+    shape = (config.showup_mean / config.showup_sd) ** 2
+    lead = stats.gamma(shape, scale=config.showup_mean / shape)
+    sigma2 = np.log1p(config.security_time.cv**2)
+    x, w = np.polynomial.hermite.hermgauss(nodes)
+    service = np.exp(np.log(config.security_time.mean) - sigma2 / 2 + np.sqrt(2 * sigma2) * x)
+    weights = w / np.sqrt(np.pi)
+
+    departures = np.array([f.departure for f in config.schedule])[:, None, None]
+    t = np.asarray(times, dtype=float)[None, :, None]
+    # A <= t means lead >= departure - t, and A > t - S means lead < departure - t + S.
+    present = lead.sf(departures - t) - lead.sf(departures - t + service[None, None, :])
+    return config.load_factor * (present * weights).sum(axis=2)
+
+
 @dataclass
 class TerminalRun:
     sim: Simulation
