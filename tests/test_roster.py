@@ -6,7 +6,7 @@ import pytest
 from simengine.kernel import Simulation
 from simengine.resource import Resource
 from simengine.rng import Streams
-from simengine.roster import as_roster, server_hours, shift, staff_to_load
+from simengine.roster import as_roster, cover_with_shifts, server_hours, shift, staff_to_load
 from simengine.schedule import synthetic_schedule
 from simengine.terminal import (
     TerminalConfig,
@@ -121,3 +121,35 @@ def test_roster_that_closes_on_a_queue_is_an_error():
     config = replace(BASE, security_lanes=shift(7, 3, 10))
     with pytest.raises(RuntimeError, match="never cleared"):
         simulate_terminal(config, generate_demand(config, Streams(1, 0)))
+
+
+def test_shift_cover_finds_the_cheapest_roster():
+    # Hours 10 and 11 need three lanes, so three shifts of at least 4 hours must cover them, one of
+    # them stretching back to 06:00 and one forward to 13:00. The best is 6 + 4 + 4 = 14 lane hours.
+    need = (0,) * 6 + (1, 1, 1, 1, 3, 3, 1, 1) + (0,) * 10
+    roster, shifts = cover_with_shifts(need, min_hours=4, max_hours=8)
+    assert sum(roster) == 14
+    assert all(r >= n for r, n in zip(roster, need))
+    assert all(4 <= s.hours <= 8 for s in shifts)
+
+
+def test_one_hour_shifts_reproduce_the_requirement():
+    need = staff_to_load(offered_load(BASE, 10)["security"], 0.9, 1, (3, 21))
+    assert cover_with_shifts(need, min_hours=1, max_hours=24)[0] == need
+
+
+def test_shift_rules_hold_on_a_real_requirement():
+    need = staff_to_load(offered_load(BASE, 10)["security"], 0.9, 1, (3, 21))
+    roster, shifts = cover_with_shifts(need, min_hours=4, max_hours=8, max_step=3)
+    rebuilt = np.zeros(24, dtype=int)
+    for s in shifts:
+        assert 4 <= s.hours <= 8 and 3 <= s.start and s.start + s.hours <= 21
+        rebuilt[s.start : s.start + s.hours] += s.lanes
+    assert tuple(rebuilt) == roster
+    assert all(r >= n for r, n in zip(roster, need))
+    assert np.abs(np.diff(roster[3:21])).max() <= 3
+
+
+def test_impossible_shift_rules_are_an_error():
+    with pytest.raises(ValueError):
+        cover_with_shifts(shift(2, 6, 9), min_hours=4, max_hours=8)

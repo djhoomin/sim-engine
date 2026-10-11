@@ -188,6 +188,22 @@ cost it wins, 30 replications, 95% intervals:
 | P95 security wait (min) | 0.57 ± 0.04 | 0.41 ± 0.02 | -0.16 ± 0.04 |
 | Worst open hour, mean wait (min) | 1.00 ± 0.16 | 0.42 ± 0.08 | -0.58 ± 0.18 |
 
+Those rosters swing hard, from 12 lanes to 3 within two hours, which real shifts may not allow.
+`cover_with_shifts` builds the cheapest roster from whole shifts that meets a requirement every
+hour, with a minimum and maximum shift length and a cap on lanes opening or closing per hour. It
+is the classic shift covering integer program, small enough that SciPy's HiGHS solves it exactly
+in milliseconds. With 4 to 8 hour shifts and at most 3 lanes changing per hour, 30 replications:
+
+| Comparison | Lane hours | P95 wait (min) | Worst open hour (min) |
+| --- | --- | --- | --- |
+| Unconstrained, busiest 10 min at 90% | 94 | 0.41 ± 0.02 | 0.42 ± 0.08 |
+| Same requirement built from shifts | 105 | 0.34 ± 0.02 | 0.42 ± 0.08 |
+| Shifts at equal cost (target 100%) | 95 | 0.97 ± 0.15 | 0.97 ± 0.20 |
+
+Shift rules cost about 12% more lane hours to keep service no worse in any hour. Spent at equal
+cost instead, they more than double the tail wait, because shifts hold lanes open through quiet
+hours such as 07:00 and 08:00 and leave too few for the 16:00 ramp.
+
 A side finding: about 13 passengers a day arrive before security opens at 03:00 and wait for
 it, around 25 minutes on average. No roster during open hours changes that. Only the opening
 time does, which is why the worst-hour KPI covers open hours only.
@@ -203,9 +219,6 @@ fit. The same fit rejects a 5% error in the mean at p below 1e-18.
 
 Next steps, roughly in order:
 
-- Roster constraints that real operations have, such as minimum shift lengths and limits on how
-  many lanes can open or close at once. Both rosters swing hard, the hourly one from 12 lanes at
-  10:00 to 3 at 12:00, which may not be staffable.
 - Real data. A published schedule for a real airport day would replace the synthetic one through
   `load_schedule` with no other change. Show-up profiles and service times are the parameters that
   most need real values.

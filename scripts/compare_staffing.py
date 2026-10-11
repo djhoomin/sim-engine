@@ -8,14 +8,17 @@ Scenarios:
   loadU        lanes per hour sized to the hour's mean expected load at utilisation U
   peakU        lanes per hour sized to the busiest 10 minutes of the hour at utilisation U
 
-    uv run python scripts/compare_staffing.py load0.7 peak0.9 --reps 30
+Add +s to any scenario to build it from whole shifts instead, the cheapest set of shifts that
+meets it every hour, using --min-shift, --max-shift and --max-step.
+
+    uv run python scripts/compare_staffing.py peak0.9 peak1.0+s --reps 30
 """
 
 import argparse
 from dataclasses import replace
 
 from simengine.experiment import paired_difference, run_experiment
-from simengine.roster import Roster, server_hours, shift, staff_to_load
+from simengine.roster import Roster, cover_with_shifts, server_hours, shift, staff_to_load
 from simengine.schedule import synthetic_schedule
 from simengine.terminal import TerminalConfig, offered_load, terminal_model
 
@@ -32,7 +35,10 @@ KPIS = [
 ]
 
 
-def roster_for(name: str, config: TerminalConfig) -> Roster:
+def roster_for(name: str, config: TerminalConfig, args: argparse.Namespace) -> Roster:
+    if name.endswith("+s"):
+        requirement = roster_for(name[:-2], config, args)
+        return cover_with_shifts(requirement, args.min_shift, args.max_shift, args.max_step)[0]
     if name.startswith("flat"):
         return shift(int(name[4:]), *OPEN)
     if name.startswith("load"):
@@ -52,6 +58,9 @@ def main() -> None:
     parser.add_argument("--desks", type=int, default=22)
     parser.add_argument("--reps", type=int, default=30)
     parser.add_argument("--seed", type=int, default=20261011)
+    parser.add_argument("--min-shift", type=int, default=4, help="hours")
+    parser.add_argument("--max-shift", type=int, default=8, help="hours")
+    parser.add_argument("--max-step", type=int, default=3, help="lanes opening or closing per hour")
     args = parser.parse_args()
     if len(args.scenarios) != 2:
         parser.error("give exactly two scenarios")
@@ -61,7 +70,7 @@ def main() -> None:
         checkin_desks=shift(args.desks, *OPEN),
         security_lanes=shift(1, *OPEN),
     )
-    configs = [replace(base, security_lanes=roster_for(n, base)) for n in args.scenarios]
+    configs = [replace(base, security_lanes=roster_for(n, base, args)) for n in args.scenarios]
     a, b = (run_experiment(terminal_model, c, args.reps, args.seed) for c in configs)
     paths = [a.save(), b.save()]
 
