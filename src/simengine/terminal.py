@@ -65,6 +65,11 @@ class TerminalConfig:
     security_cutoff: float = 30.0  # clearing security later than this before departure counts as late
     # When set, these replace showup_mean, showup_sd and load_factor, chosen by departure hour.
     showup_bands: tuple[ShowUpBand, ...] = ()
+    # Demand variation beyond independent passengers. Each replication is one day and draws a
+    # lognormal multiplier on every load factor with this log standard deviation. Each flight then
+    # draws its own load factor from a beta with this concentration, where None means no variation.
+    day_sd: float = 0.0
+    flight_concentration: float | None = None
 
 
 def flight_profiles(config: TerminalConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -107,6 +112,16 @@ def generate_demand(config: TerminalConfig, streams: Streams) -> Demand:
     departures = np.array([f.departure for f in config.schedule])
     seats = np.array([f.seats for f in config.schedule])
     mean, sd, load = flight_profiles(config)
+    # Separate streams, drawn only when used, so adding variation leaves every other draw alone.
+    if config.day_sd > 0:
+        sigma = config.day_sd
+        load = load * np.exp(streams.stream("day").normal(-sigma**2 / 2, sigma))
+    load = np.clip(load, 0.0, 0.999)
+    if config.flight_concentration is not None:
+        k = config.flight_concentration
+        if not k > 0:
+            raise ValueError(f"flight_concentration must be positive, got {k}")
+        load = streams.stream("flight_load").beta(k * load, k * (1 - load))
     pax = streams.stream("load").binomial(seats, load)
     flight = np.repeat(np.arange(len(seats)), pax)
     n = len(flight)

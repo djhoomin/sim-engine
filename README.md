@@ -222,7 +222,7 @@ Next steps, roughly in order:
 - Copenhagen waits. Use the Copenhagen wait history as a second check, once a departure schedule
   for those dates is available (see Real data below).
 - Check-in rosters, using the same machinery as security.
-- Real day-to-day variability in demand. See the replay results under Real data.
+- What moves passengers between hours at a real checkpoint. See Demand variation under Real data.
 
 ## Real data
 
@@ -304,3 +304,35 @@ Three findings.
 
 Waiting times from the replay are what a hypothetical roster would give, since real MSY staffing
 is not public, so they say nothing about MSY.
+
+### Demand variation
+
+The terminal model now has two optional layers of demand variation on top of independent
+passengers, each on its own random stream so switching them on leaves every other draw alone. A
+day-level multiplier on all load factors, lognormal with log standard deviation `day_sd`, drawn once
+per replication. A flight-level load factor drawn from a beta with concentration
+`flight_concentration` around the band's mean. `calibration.fit_dispersion` estimates both by
+the method of moments, with tests that it recovers known values and that it does not mistake timing
+noise for load variation.
+
+On the MSY fit week the day multiplier has a log standard deviation of 0.074, with daily factors
+from 0.91 to 1.10. With it switched on, the replay of the test week improves:
+
+| | Independent passengers | With day variation |
+| --- | --- | --- |
+| Daily totals inside the 95% band | 0 of 7 | 6 of 7 |
+| Hours inside the 95% band, mean over days | 20% | 38% |
+
+Sunday stays outside. It was the busiest day in both weeks, which hints at a day-of-week effect
+that one week of fitting cannot estimate.
+
+The flight layer could not be estimated, and the reason is the more useful finding. Of the squared
+hourly residuals on the fit week, 61% repeat at the same hour every day, an error in the mean
+model's shape rather than randomness. The remaining day-to-day part is still larger than any load
+variation could produce, even with every flight either full or empty. So hourly counts move for
+reasons other than how many people fly. The repeating residuals point at one. From 09:00 to 12:00
+they run -146, -406, +198 and +141, and at 14:00 and 15:00 -169 and +204, a dip followed by a
+catch-up with passengers roughly conserved. TSA counts passengers screened, not passengers arriving,
+so a drop in lanes open, at a shift change or for breaks, would hold passengers in the queue and
+push them into the next hour's count. That is a capacity explanation, not a demand one, and these
+data cannot confirm it. Observed waiting times at the same checkpoint could.

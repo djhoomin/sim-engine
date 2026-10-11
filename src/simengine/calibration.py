@@ -127,6 +127,94 @@ def fit_showup_grouped(
     return GroupedShowUpFit(fits, loglik, len(observed))
 
 
+@dataclass(frozen=True)
+class Dispersion:
+    """Variation in demand beyond independent passengers.
+
+    `day_sd` is the standard deviation of the log of a multiplier on every flight's load factor,
+    one draw per day. `flight_concentration` is the beta concentration of each flight's own load
+    factor around its mean, where smaller means more variation and infinity means none. It is NaN
+    when the residuals exceed what any load variation could produce, even every flight being either
+    full or empty, so that variation must come from something else, such as timing.
+    """
+
+    day_sd: float
+    flight_concentration: float
+    # Share of squared hourly residuals that repeats at the same hour every day. That part is an
+    # error in the mean model's shape, which no amount of random variation represents.
+    systematic_share: float = 0.0
+
+
+def bin_probabilities(
+    departures: np.ndarray, groups: np.ndarray, edges: np.ndarray, fit: "GroupedShowUpFit"
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per flight, the chance one passenger lands in each bin, and the flight's mean load factor."""
+    q = np.zeros((len(departures), len(edges) - 1))
+    load = np.zeros(len(departures))
+    for g, profile in enumerate(fit.groups):
+        mine = groups == g
+        shape, scale = gamma_shape_scale(profile.mean, profile.sd)
+        cdf = stats.gamma.cdf(np.subtract.outer(departures[mine], edges), shape, scale=scale)
+        q[mine] = cdf[:, :-1] - cdf[:, 1:]
+        load[mine] = profile.load_factor
+    return q, load
+
+
+def fit_dispersion(
+    departures: np.ndarray,
+    seats: np.ndarray,
+    groups: np.ndarray,
+    edges: np.ndarray,
+    observed: np.ndarray,
+    day_of_bin: np.ndarray,
+    fit: "GroupedShowUpFit",
+    hour_of_bin: np.ndarray | None = None,
+) -> Dispersion:
+    """Method of moments estimates of day and flight variation, given a fitted mean model.
+
+    Day: each day's observed total over its expected total is that day's multiplier, and the
+    spread of their logs estimates `day_sd`. Flight: with each day's multiplier applied, the squared
+    hourly residuals beyond what independent passengers explain are set equal to the extra variance
+    a beta load factor adds, which for flight f in bin b is s(s - 1) q^2 p(1 - p) / (concentration + 1).
+
+    With `hour_of_bin`, the residual that repeats at the same hour on every day is removed first and
+    reported as `systematic_share`, so the flight term only takes variation from day to day. That
+    needs the same bins on every day. Without it, the flight term takes all hourly variation the mean
+    model does not explain, shape errors included.
+    """
+    departures, seats, groups, edges, observed, day_of_bin = map(
+        np.asarray, (departures, seats, groups, edges, observed, day_of_bin)
+    )
+    q, load = bin_probabilities(departures, groups, edges, fit)
+    expected = (seats * load) @ q
+    days = np.unique(day_of_bin)
+    ratio = np.array([observed[day_of_bin == d].sum() / expected[day_of_bin == d].sum() for d in days])
+    day_sd = float(np.std(np.log(ratio), ddof=1)) if len(days) > 1 else 0.0
+
+    flight_day = np.clip(np.floor(departures / 1440).astype(int), 0, len(days) - 1)
+    p = np.clip(load * ratio[flight_day], 0.0, 0.999)[:, None]
+    mean = (seats[:, None] * q * p).sum(axis=0)
+    passenger_var = (seats[:, None] * q * p * (1 - q * p)).sum(axis=0)
+    flight_unit = ((seats * (seats - 1))[:, None] * q**2 * p * (1 - p)).sum(axis=0)
+    residual = observed - mean
+    systematic_share = 0.0
+    if hour_of_bin is not None and len(days) > 1:
+        hours = np.asarray(hour_of_bin)
+        by_hour = {h: residual[hours == h].mean() for h in np.unique(hours)}
+        systematic = np.array([by_hour[h] for h in hours])
+        systematic_share = float((systematic**2).sum() / (residual**2).sum())
+        # Removing a mean per hour over D days takes away 1/D of the random variance as well.
+        residual = (residual - systematic) * np.sqrt(len(days) / (len(days) - 1))
+    excess = float((residual**2 - passenger_var).sum())
+    if excess <= 0:
+        concentration = np.inf
+    elif excess >= flight_unit.sum():
+        concentration = np.nan
+    else:
+        concentration = flight_unit.sum() / excess - 1
+    return Dispersion(day_sd, float(concentration), systematic_share)
+
+
 def fit_scores(observed: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
     """Error measures for predicted against observed counts."""
     err = np.asarray(predicted) - np.asarray(observed)

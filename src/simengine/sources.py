@@ -37,6 +37,7 @@ class CalibrationInputs:
     edges: np.ndarray
     observed: np.ndarray
     hour_of_bin: np.ndarray
+    day_of_bin: np.ndarray
 
 
 def calibration_inputs(
@@ -62,8 +63,9 @@ def calibration_inputs(
                 seats.append(int(r["seats"]))
 
     hourly = read_checkpoint_hourly(checkpoint_csv)
-    edges, observed, hour_of_bin = [0.0], [], []
-    for d in days:
+    edges, observed, hour_of_bin, day_of_bin = [0.0], [], [], []
+    for i, d in enumerate(days):
+        day_of_bin += [i] * (25 - first_open_hour)
         base = (d - origin).days * 1440
         observed.append(sum(hourly[(d, h)] for h in range(first_open_hour)))
         hour_of_bin.append(first_open_hour - 1)
@@ -78,4 +80,5 @@ def calibration_inputs(
         np.array(edges, float),
         np.array(observed, float),
         np.array(hour_of_bin),
+        np.array(day_of_bin),
     )
