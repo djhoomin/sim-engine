@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy import stats
 
+from .calibration import expected_showups
 from .kernel import Simulation
 from .resource import Resource, Visit
 from .rng import Streams
@@ -93,15 +94,11 @@ def expected_arrivals(config: TerminalConfig, interval: float = 60.0) -> np.ndar
     """Expected passengers arriving in each `interval` minutes of the day, from the schedule."""
     if (24 * 60) % interval:
         raise ValueError("interval must divide the day evenly")
-    shape = (config.showup_mean / config.showup_sd) ** 2
-    lead = stats.gamma(shape, scale=config.showup_mean / shape)
     edges = np.arange(0, 24 * 60 + interval / 2, interval)
-    expected = np.zeros(len(edges) - 1)
-    for f in config.schedule:
-        # Arriving in [a, b) means a lead time in (departure - b, departure - a].
-        cdf = lead.cdf(f.departure - edges)
-        expected += f.seats * config.load_factor * (cdf[:-1] - cdf[1:])
-    return expected
+    departures = np.array([f.departure for f in config.schedule])
+    seats = np.array([f.seats for f in config.schedule])
+    unit = expected_showups(departures, seats, edges, config.showup_mean, config.showup_sd)
+    return config.load_factor * unit
 
 
 def expected_arrivals_by_hour(config: TerminalConfig) -> np.ndarray:

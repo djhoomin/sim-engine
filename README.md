@@ -219,6 +219,50 @@ fit. The same fit rejects a 5% error in the mean at p below 1e-18.
 
 Next steps, roughly in order:
 
-- Real data. A published schedule for a real airport day would replace the synthetic one through
-  `load_schedule` with no other change. Show-up profiles and service times are the parameters that
-  most need real values.
+- Copenhagen waits. Use the Copenhagen wait history as a second check, once a departure schedule
+  for those dates is available (see Real data below).
+- Check-in rosters, using the same machinery as security.
+
+## Real data
+
+Searched on 11 October 2026. What is publicly available:
+
+| Source | What it gives | Access | Gap |
+| --- | --- | --- | --- |
+| TSA FOIA reading room, weekly throughput | Passengers screened per hour per checkpoint, every US airport | Public PDFs, current to early October 2026 | US only, no waiting times |
+| BTS reporting carrier on-time data | Every scheduled departure with tail number | Public monthly files, current to July 2026 | Large US carriers only, no international |
+| FAA aircraft registry | Seats per registered aircraft | Public download | None for this use |
+| Copenhagen wait history, github.com/janschill/cph-ventetid-history | Terminal 2 and 3 security waits in 2 minute bands, December 2024 to February 2026 | Public repository, no licence file | No schedule. Lane staffing unknown |
+| OpenSky Network historical flights | Departures by airport, which would give the Copenhagen schedule | Needs a free account | Not yet requested |
+| Schiphol Flight API | Departures with aircraft type | Free key | Recent dates only, no queue or throughput data |
+| OR Tambo | Schedules through paid APIs only | Paid | No queue data |
+
+The US sources together calibrate demand without needing any staffing information, so they come
+first. `scripts/ingest_us.py` turns them into `data/us/msy_schedule_2026_07.csv` and
+`data/us/msy_tsa_2026_07.csv` for New Orleans (MSY). MSY has one terminal with one consolidated
+checkpoint and mostly origin and destination traffic, so the passengers screened there are close to
+the passengers departing.
+
+`src/simengine/calibration.py` fits the gamma show-up profile and an effective load factor by
+Poisson maximum likelihood, with an option for a separate profile per time-of-day band. Tests
+check it recovers known parameters from simulated passengers before it is used on real data.
+`scripts/calibrate_us.py` fits on one week and scores on another.
+
+Results, fitting on 12 to 18 July 2026 and testing on 19 to 25 July, then the reverse:
+
+| Model | Parameters (minutes before departure, load factor) | Out-of-sample R2 |
+| --- | --- | --- |
+| Placeholder 110 ± 35, load fitted | | 0.71 |
+| One profile | 85 ± 55, 0.83 | 0.81 and 0.85 |
+| Morning and afternoon | 74 ± 37, 0.77 to 0.80, and 144 ± 137, 0.86 to 0.87 | 0.87 and 0.87 |
+| Three bands, split at 10:00 and 15:00 | 67 ± 32, 94 to 105 ± 50, about 197 ± 189 | 0.91 and 0.91 |
+
+The parameters are stable when the weeks swap, and a separate profile by time of day clearly helps.
+Morning passengers reach the checkpoint about 70 minutes before departure. The late band is not
+believable as behaviour, though. A load factor of 1 with a mean lead of over three hours looks like
+the fit absorbing passengers for departures the BTS file does not contain, which at MSY means
+international flights and carriers that do not report. Its gain in fit is real, but its parameters
+should not be read as a show-up profile.
+
+What the TSA counts do not settle is waiting time. They count passengers screened, so the fitted
+lead time is time of screening before departure and includes any queue.

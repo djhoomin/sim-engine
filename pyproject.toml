@@ -9,7 +9,10 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pdfplumber>=0.11.10",
+    "pytest>=8",
+]
 
 [build-system]
 requires = ["hatchling"]
