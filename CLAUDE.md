@@ -1,5 +1,5 @@
-Read README.md first. It holds the whole plan and the reasoning behind it, and nothing has been
-built yet.
+Read README.md first. It holds the whole plan, the reasoning behind it, the decisions taken so
+far and the current status.
 
 Working rules for this project:
 
@@ -9,4 +9,6 @@ Working rules for this project:
   those tests run before any work against real data.
 - A simulation run is an experiment: config hash, seed, version and KPIs recorded. Never report a
   number from a single unreplicated run.
+- Run `uv run pytest` before and after any change to the engine. The validation suite is the
+  definition of correct.
 - Prose style for anything written here: no em dashes, no en dashes, no semicolons.

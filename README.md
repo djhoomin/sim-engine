@@ -1,7 +1,7 @@
 # Simulation engine, airport terminal first
 
-Started 11 October 2026. Nothing is built yet. This file is the thinking, so a fresh session can
-pick it up cold.
+Started 11 October 2026. This file is the thinking, so a fresh session can pick it up cold. The
+Python spike is scaffolded and its validation suite passes. See Status at the bottom.
 
 ## Why this exists
 
@@ -105,9 +105,38 @@ the commercial tools actually give people, OR-Tools CP-SAT and HiGHS for the opt
 it arrives. The hybrid pattern worth knowing is agent-based actors making decisions on top of
 discrete-event resources, which is where the old agent-based work and this project meet.
 
-## Open questions
+## Decisions
 
-- Retrieve the master's engine. Which language, and is any of it worth porting as reference?
-- Synthetic data to start, or approach someone for a real schedule and real service times?
-- Is the end state a library, a portfolio piece, or something that gets used on a client engagement?
-  The answer changes how much the calibration layer matters.
+Settled on 11 October 2026, replacing the earlier open questions.
+
+- **End state is a library.** That makes the calibration layer first-class rather than a nice to
+  have, since fitting to operational data is a large part of the gap the library is meant to fill.
+- **Real data is preferred, synthetic is acceptable.** Try to get a real schedule and real service
+  times. Build against synthetic data until that happens, and keep the data interface the same so
+  swapping is cheap.
+- **The master's engine is not needed.** It was agent-based, so it does not inform the
+  discrete-event core.
+
+## Status
+
+The spike lives in `src/simengine` and runs on Python 3.12 via uv.
+
+- `rng.py` gives named streams keyed by base seed, replication and stream name. Scenario
+  parameters never enter the seed, which is what gives common random numbers.
+- `kernel.py` is the event list and clock.
+- `resource.py` is a multi-server FIFO resource with per-visit traces, time-weighted statistics
+  and an exact sample-path Little's Law check.
+- `queueing.py` holds the closed forms: M/M/1, Erlang C for M/M/c, and the Lindley recursion.
+- `station.py` is a single station with renewal arrivals. Entities draw their service requirement
+  at arrival so it stays synchronised across scenarios.
+- `experiment.py` runs replications and records config hash, base seed, engine version, git state
+  and per-replication KPIs. It refuses a single replication and gives paired confidence intervals
+  on scenario differences.
+
+Run the suite with `uv run pytest`. It checks M/M/1 and M/M/c against theory at 99% confidence
+with a precision guard, the engine against the Lindley recursion customer by customer, Little's
+Law exactly and statistically, and that common random numbers cut the variance of a scenario
+difference.
+
+Next is the terminal itself: a non-stationary arrival process from a flight schedule, then
+check-in feeding security, then the two-scenario staffing comparison.
