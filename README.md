@@ -1,24 +1,40 @@
 # Simulation engine, airport terminal first
 
-Started 11 October 2026. This file is the thinking, so a fresh session can pick it up cold. The
-Python spike is scaffolded and its validation suite passes. See Status at the bottom.
+I started this on 11 October 2026 to put my operations research background back to work on a
+current problem, and this README is where I keep the thinking, the decisions and the results as the
+project moves along. The Python engine is built and its validation suite passes, and everything
+from Status onwards is what I have found so far, first on synthetic data and then on two real
+airports.
+
+![A simulated morning at Kastrup security](docs/media/kastrup_morning.gif)
+
+This is a simulated morning at Kastrup on Sunday 25 January 2026, built from that day's real
+departures, with passengers arriving in pulses off the metro and trains and a simulated supervisor
+opening lanes within a staff limit that follows the shifts, set against the waits Kastrup's own
+feed reported that morning. I picked the day by rule as the median of the held-out days by error,
+so it is a typical day for the model and it shows where the model still misses, like the 07:00
+peak. There is an MP4 version in `docs/media/`, and `scripts/make_visuals.py` rebuilds everything.
+
+![Checked against theory, then against real airports](docs/media/model_against_reality.png)
 
 ## Why this exists
 
-DJ has an MSc in Operations Research (cum laude), a BCom Hons in OR and a BSc in Mathematical
-Sciences, all Stellenbosch, and two peer-reviewed papers on agent-based resistance modelling in the
-Journal of Economic Entomology. That background has been dormant for about a decade while the work
-was machine learning, platform and research leadership. The aim here is to put it back to use on
-something current, and to end up with a portfolio piece rather than a hobby.
+I have an MSc in Operations Research (cum laude), a BCom Hons in OR and a BSc in Mathematical
+Sciences, all from Stellenbosch, and two peer-reviewed papers on agent-based resistance modelling
+in the Journal of Economic Entomology. That background has been sitting mostly unused for about a
+decade while my work went into machine learning, platform and research leadership, so the aim here
+is to put it back to use on something current and end up with a library and a piece of work I can
+point people to.
 
-The master's simulation engine is not on this machine. It is agent-based and the domain is pest
-resistance, so it is worth retrieving as reference and as a re-entry exercise, but it is not the
-thing to extend. Airports need discrete-event semantics, which is a different paradigm.
+My master's simulation engine was agent-based and built for pest resistance, and airports need
+discrete-event semantics, which is a different paradigm altogether, so this one starts from
+scratch.
 
 ## The strategic read
 
-Do not build a general-purpose simulation engine. AnyLogic, Simio, FlexSim and Arena own the
-commercial end and SimPy owns the free Python end. The gap sits between them, and it is specific:
+General-purpose simulation is a crowded space, with AnyLogic, Simio, FlexSim and Arena at the
+commercial end and SimPy as the free Python option, so I am aiming at the gap between them, which is
+quite specific:
 
 1. **Speed at scale.** SimPy is single-threaded pure Python. It is comfortable at a few hundred
    thousand events and unhappy at tens of millions, which is what a realistic terminal or line model
@@ -32,19 +48,19 @@ commercial end and SimPy owns the free Python end. The gap sits between them, an
 
 ## The differentiator
 
-Number 3 is the unfair advantage and the reason this is worth doing at all. DJ built the model
-evaluation stack at Raw Power Labs: seeds, scoring, prompt-version tracking, and the ship-or-not
-standard the team used. Treating every simulation run as a tracked experiment with a config hash, a
-seed, a version and KPIs out is the same discipline applied to a field that lacks it. That is the
-two halves of the career joining up, rather than picking up a cold subfield.
+Number 3 is where I can add the most and the reason this is worth doing at all. I built the model
+evaluation stack at Raw Power Labs (seeds, scoring, prompt-version tracking and the ship-or-not
+standard the team used), and treating every simulation run as a tracked experiment with a config
+hash, a seed, a version and KPIs out is the same discipline applied to a field that mostly goes
+without it, so this joins up the two halves of my career.
 
 ## Why an airport, and not a logistics line
 
 The system decomposes cleanly into arrivals, check-in, security, gates and baggage. The KPIs are
 unarguable: queue time, throughput, missed connections, resource utilisation. There is published
-literature to validate against. Copenhagen Airport is local and a plausible reference. And it demos
-well, which matters if this doubles as a portfolio piece. A logistics line is structurally similar
-but real data is harder to come by.
+literature to validate against. Copenhagen Airport is my local airport and a plausible reference,
+and an airport demos well, which matters if this doubles as a portfolio piece. A logistics line is
+structurally similar, but its real data is a lot harder to come by.
 
 ## Architecture
 
@@ -98,8 +114,8 @@ but they are worthless on top of a model nobody trusts yet.
 
 ## Commercial relevance, if it matters later
 
-The Danish industrial base is full of problems where the value sits in the decision rather than the
-prediction: Mærsk and DSV on networks and scheduling, Danish Crown and Arla on production planning,
+The Danish industrial base is full of problems where the value is in making the decision, which is
+what OR is for: Mærsk and DSV on networks and scheduling, Danish Crown and Arla on production planning,
 Vestas, Ørsted and Energinet on capacity and maintenance, Grundfos and Danfoss on manufacturing.
 
 ## Prior art to read before writing code
@@ -113,12 +129,12 @@ discrete-event resources, which is where the old agent-based work and this proje
 
 Settled on 11 October 2026, replacing the earlier open questions.
 
-- **End state is a library.** That makes the calibration layer first-class rather than a nice to
-  have, since fitting to operational data is a large part of the gap the library is meant to fill.
+- **End state is a library.** That makes the calibration layer a first-class part of it, since
+  fitting to operational data is a large part of the gap the library is meant to fill.
 - **Real data is preferred, synthetic is acceptable.** Try to get a real schedule and real service
   times. Build against synthetic data until that happens, and keep the data interface the same so
   swapping is cheap.
-- **The master's engine is not needed.** It was agent-based, so it does not inform the
+- **My master's engine is not needed.** It was agent-based, so it does not inform the
   discrete-event core.
 
 ## Status
@@ -209,7 +225,7 @@ it, around 25 minutes on average. No roster during open hours changes that. Only
 time does, which is why the worst-hour KPI covers open hours only.
 
 All service and show-up parameters are plausible placeholders, not calibrated values, so these
-numbers demonstrate the machinery rather than say anything about a real airport.
+numbers only demonstrate the machinery and say nothing about a real airport.
 
 The non-stationary arrivals are validated in `tests/test_nonstationary.py`. Over 300
 replications with unlimited lanes, the number at security matches the M(t)/G/infinity mean at
@@ -428,9 +444,8 @@ The policy model helps in January and barely in September, and both best fits si
 the grid, September at the most lanes tried and January at the fewest lanes and lowest threshold.
 
 What the waits identify is capacity in passengers per hour, not lanes. At 150 passengers per lane
-hour, 16 lanes is about 2,400 passengers an hour, the same as 8 CT lanes at 300. Operational
-experience is that Kastrup rarely if ever staffs more than about 10 lanes, whatever the physical
-count. That is consistent with these fits if each lane handles 250 to 360 passengers an hour, which
+hour, 16 lanes is about 2,400 passengers an hour, the same as 8 CT lanes at 300. From what I
+have seen, Kastrup rarely if ever staffs more than about 10 lanes, whatever the physical count. That is consistent with these fits if each lane handles 250 to 360 passengers an hour, which
 is within reach for CT lanes where laptops and liquids stay in the bag, but these data cannot
 distinguish it from more, slower lanes. The capacity estimate also moves one for one with the
 assumed transfer share, which is a guess.
@@ -444,8 +459,8 @@ starts testing staffing policies, which is where it becomes useful to an operato
 
 `src/simengine/checkpoint.py` models a checkpoint as separate queues, each feeding its own group of
 lanes with its own speed, which is how Kastrup ran during the move to CT. Automated gates send each
-passenger to one queue, either the conventional X-ray lanes, of which at most two were ever staffed
-out of four, or one of the CT groups, a queue per pair of CT machines. Eleven CT lanes were in
+passenger to one queue, either the conventional X-ray lanes, where I never saw more than two of the
+four staffed, or one of the CT groups, a queue per pair of CT machines. Eleven CT lanes were in
 service from September 2025, so the layout is five CT pairs, one single CT lane and the X-ray
 group. Staffing is decided for the whole checkpoint and fills CT first, with X-ray as overflow. A
 group told to close stops taking passengers at the gates and keeps one lane open until its queue
@@ -461,8 +476,8 @@ lanes and CT speeds of 250 to 450 passengers an hour, X-ray staying at 150:
 | September 2025 | open above 10 min, close below 2, 10 lanes, CT 300 an hour | 5,086 against 5,847 | -0.19 | 0.56 |
 | January 2026 | open above 8 min, close below 2, 10 lanes, CT 250 an hour | 1,956 against 2,113 | 0.25 | 0.51 |
 
-Both months prefer a limit of 10 staffed lanes to 12, in line with the operational view that
-Kastrup does not staff more than about 10. The split model follows single days better than either
+Both months prefer a limit of 10 staffed lanes to 12, which matches what I have seen at Kastrup,
+where they rarely if ever staff more than about 10. The split model follows single days better than either
 earlier model but the average profile worse, and in September it fits the fit days less well than
 the single-queue policy did. Its misses cluster. From 04:00 to 06:00 and at 18:00 in September the
 observed waits are about twice the simulated ones, and at 18:00 the simulation even closes lanes.

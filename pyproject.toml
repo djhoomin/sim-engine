@@ -15,6 +15,10 @@ dev = [
     "pdfplumber>=0.11.10",
     "pytest>=8",
 ]
+viz = [
+    "matplotlib>=3.11.2",
+    "pillow>=12.3.0",
+]
 
 [build-system]
 requires = ["hatchling"]
