@@ -116,3 +116,25 @@ def read_wait_bands_hourly(
             weight[(t.date(), t.hour)] += minutes
             t = stop
     return {k: total[k] / weight[k] for k in total if weight[k] > 0}
+
+
+def read_departures_by_day(path: str | Path) -> dict[dt.date, list[tuple[float, int]]]:
+    """(minutes after midnight, seats) per date from a schedule CSV with date, departure and seats."""
+    days: dict[dt.date, list[tuple[float, int]]] = defaultdict(list)
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            hh, mm = r["departure"].split(":")
+            days[dt.date.fromisoformat(r["date"])].append((60 * int(hh) + int(mm), int(r["seats"])))
+    return days
+
+
+def day_flights(days: dict[dt.date, list[tuple[float, int]]], day: dt.date, day_start: int = 3):
+    """One operating day's departures, from `day_start` to the same hour the next day, on one clock.
+
+    Flights just after midnight belong with the evening before, since their passengers arrive then.
+    """
+    from .schedule import Flight
+
+    late = [Flight(m, s) for m, s in days[day] if m >= 60 * day_start]
+    early = [Flight(m + 1440, s) for m, s in days[day + dt.timedelta(days=1)] if m < 60 * day_start]
+    return tuple(sorted(late + early, key=lambda f: f.departure))

@@ -22,6 +22,7 @@ import numpy as np
 from scipy import stats
 
 from .calibration import expected_showups
+from .control import QueueController, QueuePolicy
 from .kernel import Simulation
 from .resource import Resource, Visit
 from .rng import Streams
@@ -70,6 +71,9 @@ class TerminalConfig:
     # draws its own load factor from a beta with this concentration, where None means no variation.
     day_sd: float = 0.0
     flight_concentration: float | None = None
+    # When set, security lanes follow the queue under this policy, and security_lanes becomes the
+    # number of lanes available each hour rather than the number open.
+    security_policy: QueuePolicy | None = None
 
 
 def flight_profiles(config: TerminalConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -216,12 +220,23 @@ def simulate_terminal(config: TerminalConfig, demand: Demand, until: float | Non
     sim = Simulation(start=float(demand.arrival.min()))
     rosters = {"checkin": as_roster(config.checkin_desks), "security": as_roster(config.security_lanes)}
     first_hour = int(sim.now // 60)
+
+    def available(t: float) -> int:
+        return rosters["security"][int(t // 60) % HOURS]
+
     checkin = Resource(sim, "checkin", rosters["checkin"][first_hour % HOURS])
-    security = Resource(sim, "security", rosters["security"][first_hour % HOURS])
-    # Capacity changes on the hour through to the end of the day, then holds at the last count.
+    policy = config.security_policy
+    start = min(policy.min_servers, available(sim.now)) if policy else rosters["security"][first_hour % HOURS]
+    security = Resource(sim, "security", start)
+    # Rostered capacity changes on the hour through to the end of the day, then holds at the last count.
+    scheduled = (checkin,) if policy else (checkin, security)
     for hour in range(first_hour + 1, HOURS):
-        for resource in (checkin, security):
+        for resource in scheduled:
             sim.schedule_at(60.0 * hour, resource.set_capacity, rosters[resource.name][hour % HOURS])
+    if policy:
+        QueueController(
+            sim, security, policy, config.security_time.mean, available, float(demand.arrival.max())
+        )
 
     def to_security(entity: int) -> None:
         security.submit(entity, demand.security_time[entity])
@@ -242,6 +257,18 @@ def simulate_terminal(config: TerminalConfig, demand: Demand, until: float | Non
     if stranded and until is None:
         raise RuntimeError(f"{stranded} passengers never cleared: the roster closes on a queue")
     return TerminalRun(sim, checkin, security)
+
+
+def _hourly_capacity(resource: Resource, end: float) -> np.ndarray:
+    """Time-average servers open in each hour of the day, from the capacity log."""
+    lanes = np.zeros(HOURS)
+    log = resource.capacity_log + [(end, resource.capacity)]
+    for (t0, n), (t1, _) in zip(log, log[1:]):
+        for h in range(HOURS):
+            overlap = min(t1, 60.0 * (h + 1)) - max(t0, 60.0 * h)
+            if overlap > 0:
+                lanes[h] += n * overlap / 60
+    return lanes
 
 
 def _by_entity(visits: list[Visit]) -> list[Visit]:
@@ -303,6 +330,9 @@ def terminal_kpis(config: TerminalConfig, demand: Demand, run: TerminalRun) -> d
     # Worst over open hours only. Anyone arriving before opening waits for it whatever the roster.
     open_hours = np.array(as_roster(config.security_lanes)) > 0
     kpis["security_wait_worst_hour"] = float(wait[open_hours].max())
+    lanes = _hourly_capacity(run.security, run.sim.now)
+    for h in range(HOURS):
+        kpis[f"security_lanes_h{h:02d}"] = float(lanes[h])
     return kpis
 
 

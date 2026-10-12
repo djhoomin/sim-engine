@@ -401,3 +401,41 @@ controller, opening a lane when the queue passes a threshold and closing one whe
 another, with the thresholds fitted to the observed waits.
 
 The run takes about 20 minutes, almost all of it bisection over truncated day simulations.
+
+### Queue-responsive staffing
+
+`src/simengine/control.py` adds a `QueuePolicy`. Every few minutes a supervisor estimates the wait
+as queue length times mean service time over lanes open. Above one threshold they open lanes, which
+take a few minutes to start, and below another they close one, within the lanes available that
+hour. In the terminal model the roster then caps available lanes rather than setting them. Tests
+check that it opens under a surge and closes after, respects the cap and the minimum, keeps
+Little's Law exact, and that a tighter threshold buys shorter waits with more lane hours.
+
+`scripts/fit_policy_cph.py` fits the two thresholds and the lanes available to Kastrup's waits,
+scoring every hour of every fit day, and tests on held-out days. Lanes available is fitted because
+the checkpoint was being rebuilt through both periods. CT lanes replaced conventional X-ray lanes in
+phases from April 2025, and the new 20-lane CT checkpoint opened on 19 May 2026. January uses an
+effective load factor of 0.65, from CPH's 2.226 million passengers that month against the schedule's
+seats, less the same 15% transfer share.
+
+| Period, model | Best fit | Held-out mean profile R2 | Mean error | Single-day correlation, median |
+| --- | --- | --- | --- | --- |
+| September 2025, fixed hourly roster | lanes inferred per hour | 0.13 | 2.05 min | 0.45 |
+| September 2025, queue-responsive | open above 8 min, close below 4, 24 lanes | 0.15 | 1.78 min | 0.31 |
+| January 2026, queue-responsive | open above 4 min, close below 2, 16 lanes | 0.38 | 1.50 min | 0.47 |
+
+The policy model helps in January and barely in September, and both best fits sit at an edge of
+the grid, September at the most lanes tried and January at the fewest lanes and lowest threshold.
+
+What the waits identify is capacity in passengers per hour, not lanes. At 150 passengers per lane
+hour, 16 lanes is about 2,400 passengers an hour, the same as 8 CT lanes at 300. Operational
+experience is that Kastrup rarely if ever staffs more than about 10 lanes, whatever the physical
+count. That is consistent with these fits if each lane handles 250 to 360 passengers an hour, which
+is within reach for CT lanes where laptops and liquids stay in the bag, but these data cannot
+distinguish it from more, slower lanes. The capacity estimate also moves one for one with the
+assumed transfer share, which is a guess.
+
+The limit here is data, not modelling. Three measurements Kastrup almost certainly holds would
+settle most of it: a log of lanes open over time, passengers screened per lane per hour, and
+checkpoint entry counts from the queue sensors. With those the model stops inferring staffing and
+starts testing staffing policies, which is where it becomes useful to an operator.

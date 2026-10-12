@@ -71,12 +71,14 @@ class Resource:
         self.in_queue = TimeWeighted(sim.now)
         self.in_service = TimeWeighted(sim.now)
         self.servers = TimeWeighted(sim.now, capacity)
+        self.capacity_log: list[tuple[float, int]] = [(sim.now, capacity)]
 
     def set_capacity(self, capacity: int) -> None:
         """Open or close servers now. A closing server finishes its current entity first."""
         if capacity < 0:
             raise ValueError("capacity cannot be negative")
         self.capacity = capacity
+        self.capacity_log.append((self.sim.now, capacity))
         while self.queue and self.busy < self.capacity:
             self._start(*self.queue.popleft())
         self._record()

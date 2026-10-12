@@ -16,37 +16,19 @@ The observed "0-2 min" band means no queue, so one minute is taken off every obs
 """
 
 import argparse
-import csv
 import datetime as dt
-from collections import defaultdict
 
 import numpy as np
 
 from simengine.calibration import fit_scores
 from simengine.rng import Streams
-from simengine.schedule import Flight
-from simengine.sources import day_range, read_wait_bands_hourly
+from simengine.sources import day_flights, day_range, read_departures_by_day, read_wait_bands_hourly
 from simengine.terminal import ServiceTime, TerminalConfig, generate_demand, simulate_terminal
 
 DAY_START = 3  # hour a simulated day starts
 HOURS = range(DAY_START, 24)  # hours whose waits are inferred and scored
 AMPLE = 60  # lanes in hours not yet inferred
 NO_QUEUE = 1.0  # midpoint of the "0-2 min" band
-
-
-def read_schedule(path: str) -> dict[dt.date, list[tuple[float, int]]]:
-    days = defaultdict(list)
-    for r in csv.DictReader(open(path, newline="")):
-        hh, mm = r["departure"].split(":")
-        days[dt.date.fromisoformat(r["date"])].append((60 * int(hh) + int(mm), int(r["seats"])))
-    return days
-
-
-def day_flights(days: dict, day: dt.date) -> tuple[Flight, ...]:
-    """Day's departures from 03:00, plus the next day's before 03:00 on the same clock."""
-    late = [Flight(m, s) for m, s in days[day] if m >= 60 * DAY_START]
-    early = [Flight(m + 1440, s) for m, s in days[day + dt.timedelta(days=1)] if m < 60 * DAY_START]
-    return tuple(sorted(late + early, key=lambda f: f.departure))
 
 
 def hourly_wait(run, hour: int) -> float:
@@ -117,7 +99,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20261011)
     args = parser.parse_args()
 
-    schedule = read_schedule(args.schedule)
+    schedule = read_departures_by_day(args.schedule)
     waits = read_wait_bands_hourly(args.waits, "Europe/Copenhagen")
     queue_wait = lambda day, h: max(waits[(day, h)] - NO_QUEUE, 0.0)
 
