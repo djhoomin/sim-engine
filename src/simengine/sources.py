@@ -82,3 +82,37 @@ def calibration_inputs(
         np.array(hour_of_bin),
         np.array(day_of_bin),
     )
+
+
+def read_wait_bands_hourly(
+    path: str | Path, timezone: str, max_gap_minutes: float = 240.0
+) -> dict[tuple[dt.date, int], float]:
+    """Time-weighted mean of the wait band midpoints per local (date, hour).
+
+    Reads the CSV that scripts/ingest_cph.py writes. Each reading holds until the next one, since
+    the source records changes only. A reading followed by a gap longer than `max_gap_minutes` is
+    treated as a feed outage and contributes nothing.
+    """
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(timezone)
+    points = []
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            if r["t2_from"]:
+                when = dt.datetime.fromisoformat(r["observed_utc"]).astimezone(zone)
+                points.append((when, (int(r["t2_from"]) + int(r["t2_to"])) / 2))
+    total: dict[tuple[dt.date, int], float] = defaultdict(float)
+    weight: dict[tuple[dt.date, int], float] = defaultdict(float)
+    for (start, wait), (end, _) in zip(points, points[1:]):
+        if (end - start).total_seconds() > 60 * max_gap_minutes:
+            continue
+        t = start
+        while t < end:
+            hour_end = t.replace(minute=0, second=0, microsecond=0) + dt.timedelta(hours=1)
+            stop = min(end, hour_end)
+            minutes = (stop - t).total_seconds() / 60
+            total[(t.date(), t.hour)] += wait * minutes
+            weight[(t.date(), t.hour)] += minutes
+            t = stop
+    return {k: total[k] / weight[k] for k in total if weight[k] > 0}

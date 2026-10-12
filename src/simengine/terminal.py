@@ -211,7 +211,8 @@ class TerminalRun:
     security: Resource
 
 
-def simulate_terminal(config: TerminalConfig, demand: Demand) -> TerminalRun:
+def simulate_terminal(config: TerminalConfig, demand: Demand, until: float | None = None) -> TerminalRun:
+    """Run one day. With `until`, stop at that time and leave anyone still queuing in the queue."""
     sim = Simulation(start=float(demand.arrival.min()))
     rosters = {"checkin": as_roster(config.checkin_desks), "security": as_roster(config.security_lanes)}
     first_hour = int(sim.now // 60)
@@ -236,9 +237,9 @@ def simulate_terminal(config: TerminalConfig, demand: Demand) -> TerminalRun:
 
     for entity, t in enumerate(demand.arrival.tolist()):
         sim.schedule_at(t, arrive, entity)
-    sim.run()
+    sim.run(until)
     stranded = sum(v.depart is None for v in checkin.visits + security.visits)
-    if stranded:
+    if stranded and until is None:
         raise RuntimeError(f"{stranded} passengers never cleared: the roster closes on a queue")
     return TerminalRun(sim, checkin, security)
 

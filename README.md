@@ -370,3 +370,34 @@ Unlike MSY there are no passenger counts at Kastrup, only waits, and lane staffi
 So Kastrup cannot calibrate demand the way MSY did. What it can do is test the capacity explanation
 from MSY: given demand from the schedule, which capacity pattern through the day reproduces the
 observed waits, and is it plausible.
+
+### Inferring Kastrup's capacity from waits
+
+`scripts/infer_capacity_cph.py` runs the terminal model on each day's real Kastrup departures and
+infers lanes hour by hour, forward from 03:00, so the simulated mean wait matches the observed one.
+Assumptions, since Kastrup publishes no checkpoint counts or staffing: an effective load factor of
+0.68 (CPH's reported 80% seat occupancy in September 2025, less about 15% transfer passengers who
+skip central security), MSY's fitted show-up profile shifted 20 minutes for takeoff rather than
+scheduled time (105 ± 55 minutes before takeoff), and 150 passengers per lane hour. The September
+demand level checks out against CPH's own figure of 3.1 million passengers for the month.
+
+Fitted on 1 to 14 September 2025, tested on 15 to 29 September.
+
+- Plausible in scale. Inferred peak capacity is 21 to 25 lanes, against about 23 physical lanes
+  after the 2015 and 2018 expansions.
+- Poor out of sample. The mean daily wait profile scores R2 0.13 with a mean absolute error of 2
+  minutes, biased low, and single days correlate at a median of 0.45.
+- Unstable from hour to hour. Inferred lanes jump, for example 18, 13, 16, 18, 25 and 17 between
+  08:00 and 13:00, with no operational reason.
+
+The reason is in the utilisation column. In most hours the inferred capacity sits almost exactly at
+demand, utilisation close to 1. That is where waits are most sensitive to small changes in demand
+or lanes, so inverting waits to lanes is badly conditioned. It also says something about Kastrup.
+Waits held between 5 and 10 minutes from early morning to evening look like a checkpoint run to a
+wait target, with supervisors opening and closing lanes as the queue grows and shrinks, rather than
+a fixed roster. Under that kind of feedback the waits mostly reflect the target, and a single
+open-loop roster cannot reproduce days that differ. The next model to try is staffing as a
+controller, opening a lane when the queue passes a threshold and closing one when it falls below
+another, with the thresholds fitted to the observed waits.
+
+The run takes about 20 minutes, almost all of it bisection over truncated day simulations.
