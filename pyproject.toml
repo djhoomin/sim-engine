@@ -2,6 +2,8 @@
 name = "simengine"
 dynamic = ["version"]
 description = "Discrete-event simulation with experiment rigour built in"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.26",
