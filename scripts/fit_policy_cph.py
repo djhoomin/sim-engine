@@ -34,44 +34,20 @@ import itertools
 import numpy as np
 
 from simengine.calibration import fit_scores
-from simengine.checkpoint import LaneGroup, Layout
+from simengine import kastrup
+from simengine.checkpoint import Layout
 from simengine.control import QueuePolicy
 from simengine.rng import Streams
 from simengine.sources import day_flights, day_range, read_departures_by_day, read_wait_bands_hourly
-from simengine.terminal import (
-    ServiceTime,
-    TerminalConfig,
-    TransitLine,
-    generate_demand,
-    simulate_terminal,
-    terminal_kpis,
-)
+from simengine.terminal import TerminalConfig, generate_demand, simulate_terminal, terminal_kpis
 
 HOURS = list(range(3, 24))
-NO_QUEUE = 1.0  # midpoint of the "0-2 min" band
-
-
-RAIL = (TransitLine("metro", 0.27, headway=5.0), TransitLine("train", 0.33, headway=15.0, offset=7.0))
-
-
-def kastrup_layout(ct_speed: float) -> Layout:
-    """Eleven CT lanes in queues of two, then the X-ray lanes, two of them ever staffed."""
-    ct = [LaneGroup(f"ct{i}", 2, ct_speed) for i in range(1, 6)] + [LaneGroup("ct6", 1, ct_speed)]
-    return Layout((*ct, LaneGroup("xray", 2)))
+NO_QUEUE = kastrup.NO_QUEUE
+RAIL = kastrup.RAIL
 
 
 def base_config(flights, args) -> TerminalConfig:
-    return TerminalConfig(
-        schedule=flights,
-        checkin_desks=1,
-        security_lanes=1,
-        checkin_share=0.0,
-        load_factor=args.load_factor,
-        showup_mean=args.showup[0],
-        showup_sd=args.showup[1],
-        security_time=ServiceTime(args.service, 0.5),
-        transit=RAIL if args.transit else (),
-    )
+    return kastrup.day_config(flights, args.load_factor, tuple(args.showup), args.service, args.transit)
 
 
 def simulate(day_demand, base: TerminalConfig, policy: QueuePolicy, lanes: int, layout: Layout | None = None):
@@ -109,7 +85,7 @@ def main() -> None:
     args = parser.parse_args()
 
     schedule = read_departures_by_day(args.schedule)
-    waits = read_wait_bands_hourly(args.waits, "Europe/Copenhagen")
+    waits = read_wait_bands_hourly(args.waits, kastrup.TIMEZONE)
     usable = lambda d: bool(schedule[d]) and bool(schedule[d + dt.timedelta(days=1)])
     observed = lambda d: np.array([max(waits[(d, h)] - NO_QUEUE, 0.0) for h in HOURS])
 
@@ -125,7 +101,7 @@ def main() -> None:
         for o, c, n, v in itertools.product(args.open_above, args.close_below, args.lanes, speeds)
         if c < o
     ]
-    layout_for = lambda v: kastrup_layout(v) if v is not None else None
+    layout_for = lambda v: kastrup.transition_layout(v) if v is not None else None
     print(f"fitting {len(grid)} policies on {len(fit_days)} days, {args.fit[0]} to {args.fit[1]}")
     results = []
     for o, c, n, v in grid:

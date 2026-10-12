@@ -467,9 +467,9 @@ earlier model but the average profile worse, and in September it fits the fit da
 the single-queue policy did. Its misses cluster. From 04:00 to 06:00 and at 18:00 in September the
 observed waits are about twice the simulated ones, and at 18:00 the simulation even closes lanes.
 Both look like hours with fewer staff on duty than the flat limit allows, an early shift not yet at
-strength and a break or shift change around 18:00, the same pattern as the 10:00 dip at MSY. The
-next refinement is a staff limit that varies by shift rather than one limit all day. Best values
-again sit at grid edges, the slowest CT speed in January and the highest threshold in September.
+strength and a break or shift change around 18:00, the same pattern as the 10:00 dip at MSY. Best
+values again sit at grid edges, the slowest CT speed in January and the highest threshold in
+September.
 
 `TransitLine` in the terminal model adds rail arrivals. Rail passengers keep the time they meant to
 reach security but take the last service that gets them there by then, and a walk of about four
@@ -487,3 +487,43 @@ absorbs them by opening lanes a little more, about 1% more lane hours, and waits
 metro brings 50 to 60 passengers, a minute or two of checkpoint capacity, which the walk spreads
 further, against typical waits of 3 to 8 minutes. Under a fixed roster the pulses would reach the
 waits more directly, which makes responsive staffing worth slightly more than the averages suggest.
+
+### A staff limit by shift
+
+`scripts/fit_staff_cap_cph.py` keeps each month's supervisor policy, CT speed and split layout,
+and gives the staff limit one value per two-hour block from 03:00 instead of one value all day.
+The blocks were fixed in advance rather than placed on the hours where held-out days showed misses,
+so the test is not tuned to them. Working forward in time, each block's limit is the one that best
+matches the fit days' waits in that block. `src/simengine/kastrup.py` now holds the Kastrup facts
+and assumptions the scripts share.
+
+Held out, the same passengers under both limits:
+
+| Period, staff limit | Profile R2 | Profile mean error | Day mean error | Day correlation, median | Limit, lane hours |
+| --- | --- | --- | --- | --- | --- |
+| January 2026, flat 10 | 0.25 | 1.68 min | 2.13 min | 0.51 | 210 |
+| January 2026, by shift | 0.65 | 1.18 min | 2.06 min | 0.60 | 176 |
+| September 2025, flat 10 | -0.19 | 2.17 min | 2.95 min | 0.56 | 210 |
+| September 2025, by shift | -0.08 | 2.14 min | 2.88 min | 0.63 | 177 |
+
+The fitted limits from 03:00 in two-hour blocks:
+
+| Period | 03 | 05 | 07 | 09 | 11 | 13 | 15 | 17 | 19 | 21 | 23 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| September 2025 | 5 | 10 | 10 | 8 | 11 | 10 | 10 | 10 | 7 | 6 | 3 |
+| January 2026 | 6 | 9 | 10 | 8 | 10 | 10 | 8 | 12 | 7 | 6 | 4 |
+
+January improves a lot, with the profile R2 up from 0.25 to 0.65, and both months improve at the
+level of single days, from a limit that totals about 16% fewer lane hours. The two months agree on
+a shape that reads like shifts: a small early shift, full strength from 05:00 or 07:00, a dip at
+09:00 to 11:00, and steps down through the evening. The 12 in January's 17:00 block is the top of
+the range searched and above the 10 or so expected, so it may be compensating for the dip before it.
+
+September's two big misses remain, for different reasons. From 05:00 to 07:00 demand sits so close
+to capacity that 9 lanes lets the queue run away and 10 drains it, so no whole number of lanes
+matches the steady 8 minutes observed. That points at the early-morning demand shape, which comes
+from MSY's show-up profile, rather than at staffing. At 18:00 the observed wait jumps to 9.9 minutes
+on fit and test days alike, but a two-hour block cannot follow a one-hour dip without spoiling
+17:00, which the model gets right. Narrower blocks would follow it, at the price of fitting more
+parameters to two weeks of bands. The thresholds were also fitted under the flat limit and not
+refitted with the new one.
