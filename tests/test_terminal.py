@@ -98,3 +98,33 @@ def test_everyone_straight_to_security():
     kpis = terminal_model(config, Streams(6, 0))
     assert kpis["checkin_wait_mean"] == 0.0
     assert kpis["passengers"] == sum(kpis[f"security_screened_h{h:02d}"] for h in range(24))
+
+
+def test_transit_bunches_arrivals_without_making_anyone_late():
+    from simengine.terminal import TransitLine
+
+    rail = (TransitLine("metro", 0.27, headway=5.0), TransitLine("train", 0.33, headway=15.0, offset=7.0))
+    plain = generate_demand(BASE, Streams(8, 0))
+    bunched = generate_demand(replace(BASE, transit=rail), Streams(8, 0))
+    assert len(bunched) == len(plain)
+    # Same passengers and intended times, so rail can only bring people earlier, by under a headway
+    # plus the walk.
+    shift = np.sort(plain.arrival) - np.sort(bunched.arrival)
+    assert shift.min() >= -1e-9
+
+    def pulse_variance(arrivals: np.ndarray) -> float:
+        # Variation of minute counts around a 15 minute moving average, leaving out the daily curve.
+        per_minute = np.histogram(arrivals, np.arange(0, 1440, 1.0))[0].astype(float)
+        trend = np.convolve(per_minute, np.ones(15) / 15, mode="same")
+        return float(((per_minute - trend) ** 2).mean())
+
+    assert pulse_variance(bunched.arrival) > 2 * pulse_variance(plain.arrival)
+
+
+def test_transit_leaves_other_draws_alone():
+    from simengine.terminal import TransitLine
+
+    rail = (TransitLine("metro", 0.5, headway=5.0),)
+    plain = generate_demand(BASE, Streams(9, 0))
+    bunched = generate_demand(replace(BASE, transit=rail), Streams(9, 0))
+    assert sorted(plain.security_time) == sorted(bunched.security_time)

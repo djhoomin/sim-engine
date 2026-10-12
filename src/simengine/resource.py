@@ -72,6 +72,8 @@ class Resource:
         self.in_service = TimeWeighted(sim.now)
         self.servers = TimeWeighted(sim.now, capacity)
         self.capacity_log: list[tuple[float, int]] = [(sim.now, capacity)]
+        # Called after every change in queue, service or capacity, for anything aggregating resources.
+        self.on_change: list[Callable[["Resource"], None]] = []
 
     def set_capacity(self, capacity: int) -> None:
         """Open or close servers now. A closing server finishes its current entity first."""
@@ -120,6 +122,8 @@ class Resource:
         self.in_service.update(now, self.busy)
         # A closing server still finishing its entity is working, so it counts as open.
         self.servers.update(now, max(self.capacity, self.busy))
+        for callback in self.on_change:
+            callback(self)
 
     def reset_stats(self) -> None:
         """Start a fresh observation window now, for example at the end of warm-up."""

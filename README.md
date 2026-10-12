@@ -439,3 +439,51 @@ The limit here is data, not modelling. Three measurements Kastrup almost certain
 settle most of it: a log of lanes open over time, passengers screened per lane per hour, and
 checkpoint entry counts from the queue sensors. With those the model stops inferring staffing and
 starts testing staffing policies, which is where it becomes useful to an operator.
+
+### Split queues, CT and X-ray, and rail arrivals
+
+`src/simengine/checkpoint.py` models a checkpoint as separate queues, each feeding its own group of
+lanes with its own speed, which is how Kastrup ran during the move to CT. Automated gates send each
+passenger to one queue, either the conventional X-ray lanes, of which at most two were ever staffed
+out of four, or one of the CT groups, a queue per pair of CT machines. Eleven CT lanes were in
+service from September 2025, so the layout is five CT pairs, one single CT lane and the X-ray
+group. Staffing is decided for the whole checkpoint and fills CT first, with X-ray as overflow. A
+group told to close stops taking passengers at the gates and keeps one lane open until its queue
+has drained. Gates send passengers to the shortest estimated wait. Tests cover the opening order,
+routing, group speed, draining, the staffing cap and that a single group reproduces the plain
+single queue exactly.
+
+Fitted with `fit_policy_cph.py --layout kastrup` over the thresholds, a staff limit of 10 or 12
+lanes and CT speeds of 250 to 450 passengers an hour, X-ray staying at 150:
+
+| Period | Best fit | Fit error, 10 lanes against 12 | Held-out mean profile R2 | Single-day correlation, median |
+| --- | --- | --- | --- | --- |
+| September 2025 | open above 10 min, close below 2, 10 lanes, CT 300 an hour | 5,086 against 5,847 | -0.19 | 0.56 |
+| January 2026 | open above 8 min, close below 2, 10 lanes, CT 250 an hour | 1,956 against 2,113 | 0.25 | 0.51 |
+
+Both months prefer a limit of 10 staffed lanes to 12, in line with the operational view that
+Kastrup does not staff more than about 10. The split model follows single days better than either
+earlier model but the average profile worse, and in September it fits the fit days less well than
+the single-queue policy did. Its misses cluster. From 04:00 to 06:00 and at 18:00 in September the
+observed waits are about twice the simulated ones, and at 18:00 the simulation even closes lanes.
+Both look like hours with fewer staff on duty than the flat limit allows, an early shift not yet at
+strength and a break or shift change around 18:00, the same pattern as the 10:00 dip at MSY. The
+next refinement is a staff limit that varies by shift rather than one limit all day. Best values
+again sit at grid edges, the slowest CT speed in January and the highest threshold in September.
+
+`TransitLine` in the terminal model adds rail arrivals. Rail passengers keep the time they meant to
+reach security but take the last service that gets them there by then, and a walk of about four
+minutes from the platform smears each pulse. At Kastrup 60% of passengers came by rail in 2019, 33%
+by train and 27% by metro, so the runs use a metro every 5 minutes and a train every 15. On the
+best policies, the same passengers with and without rail pulses, held-out days, 5 replications:
+
+| Period | Mean wait | P95 wait | Peak queue | Lane hours a day |
+| --- | --- | --- | --- | --- |
+| September 2025 | -0.06 ± 0.08 min | -0.01 ± 0.26 min | +52 ± 15 | +1.6 ± 0.2 |
+| January 2026 | -0.05 ± 0.05 min | -0.06 ± 0.20 min | +32 ± 11 | +1.8 ± 0.2 |
+
+Rail pulses make the queue spikier, with peaks about 9% higher, but the queue-responsive supervisor
+absorbs them by opening lanes a little more, about 1% more lane hours, and waits do not move. A
+metro brings 50 to 60 passengers, a minute or two of checkpoint capacity, which the walk spreads
+further, against typical waits of 3 to 8 minutes. Under a fixed roster the pulses would reach the
+waits more directly, which makes responsive staffing worth slightly more than the averages suggest.

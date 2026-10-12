@@ -22,6 +22,7 @@ import numpy as np
 from scipy import stats
 
 from .calibration import expected_showups
+from .checkpoint import Checkpoint, Layout
 from .control import QueueController, QueuePolicy
 from .kernel import Simulation
 from .resource import Resource, Visit
@@ -40,6 +41,22 @@ class ServiceTime:
     def sample(self, rng: np.random.Generator, n: int) -> np.ndarray:
         sigma2 = np.log1p(self.cv**2)
         return rng.lognormal(np.log(self.mean) - sigma2 / 2, np.sqrt(sigma2), n)
+
+
+@dataclass(frozen=True)
+class TransitLine:
+    """A rail line delivering passengers to the terminal on a timetable.
+
+    Its passengers keep the time they meant to reach security, but take the last service that
+    gets them there by then, so they arrive in pulses one headway apart, smeared by the walk from
+    the platform.
+    """
+
+    name: str
+    share: float  # of all passengers
+    headway: float  # minutes between services
+    offset: float = 0.0  # minutes after midnight of a service, which fixes the timetable
+    walk: ServiceTime = field(default_factory=lambda: ServiceTime(4.0, 0.3))  # platform to queue
 
 
 @dataclass(frozen=True)
@@ -74,6 +91,11 @@ class TerminalConfig:
     # When set, security lanes follow the queue under this policy, and security_lanes becomes the
     # number of lanes available each hour rather than the number open.
     security_policy: QueuePolicy | None = None
+    # When set, security is separate queues feeding groups of lanes, such as X-ray and CT pairs,
+    # instead of one queue for every lane.
+    security_layout: Layout | None = None
+    # Rail lines that bunch passengers into pulses. Everyone else arrives independently.
+    transit: tuple[TransitLine, ...] = ()
 
 
 def flight_profiles(config: TerminalConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -132,16 +154,35 @@ def generate_demand(config: TerminalConfig, streams: Streams) -> Demand:
 
     shape = (mean / sd) ** 2
     lead = streams.stream("showup").gamma(shape[flight], (mean / shape)[flight], n)
+    arrival = departures[flight] - lead
+    if config.transit:
+        arrival = _ride_transit(arrival, config.transit, streams)
     # Service times are drawn for every passenger, including those who skip check-in, so that
     # changing the check-in share does not shift anyone else's draws.
-    order = np.argsort(departures[flight] - lead, kind="stable")
+    order = np.argsort(arrival, kind="stable")
     return Demand(
         flight=flight[order],
-        arrival=(departures[flight] - lead)[order],
+        arrival=arrival[order],
         checks_in=(streams.stream("checkin_choice").random(n) < config.checkin_share)[order],
         checkin_time=config.checkin_time.sample(streams.stream("checkin_time"), n)[order],
         security_time=config.security_time.sample(streams.stream("security_time"), n)[order],
     )
+
+
+def _ride_transit(intended: np.ndarray, lines: tuple[TransitLine, ...], streams: Streams) -> np.ndarray:
+    """Move each rail passenger onto the last service that gets them to security in time."""
+    shares = np.array([line.share for line in lines])
+    if shares.sum() > 1:
+        raise ValueError("transit shares add up to more than everyone")
+    # Line 0 to k - 1 by share, k meaning they come some other way.
+    pick = np.searchsorted(np.cumsum(shares), streams.stream("transit_line").random(len(intended)), side="right")
+    arrival = intended.copy()
+    for k, line in enumerate(lines):
+        mine = pick == k
+        walk = line.walk.sample(streams.stream(f"transit_walk_{line.name}"), int(mine.sum()))
+        service = line.offset + line.headway * np.floor((intended[mine] - walk - line.offset) / line.headway)
+        arrival[mine] = service + walk
+    return arrival
 
 
 def expected_arrivals(config: TerminalConfig, interval: float = 60.0) -> np.ndarray:
@@ -212,7 +253,7 @@ def seat_occupancy(config: TerminalConfig, times: np.ndarray, nodes: int = 64) -
 class TerminalRun:
     sim: Simulation
     checkin: Resource
-    security: Resource
+    security: Resource | Checkpoint
 
 
 def simulate_terminal(config: TerminalConfig, demand: Demand, until: float | None = None) -> TerminalRun:
@@ -227,7 +268,10 @@ def simulate_terminal(config: TerminalConfig, demand: Demand, until: float | Non
     checkin = Resource(sim, "checkin", rosters["checkin"][first_hour % HOURS])
     policy = config.security_policy
     start = min(policy.min_servers, available(sim.now)) if policy else rosters["security"][first_hour % HOURS]
-    security = Resource(sim, "security", start)
+    if config.security_layout:
+        security = Checkpoint(sim, config.security_layout, start, config.security_time.mean)
+    else:
+        security = Resource(sim, "security", start)
     # Rostered capacity changes on the hour through to the end of the day, then holds at the last count.
     scheduled = (checkin,) if policy else (checkin, security)
     for hour in range(first_hour + 1, HOURS):
@@ -333,6 +377,13 @@ def terminal_kpis(config: TerminalConfig, demand: Demand, run: TerminalRun) -> d
     lanes = _hourly_capacity(run.security, run.sim.now)
     for h in range(HOURS):
         kpis[f"security_lanes_h{h:02d}"] = float(lanes[h])
+    if config.security_layout:
+        # By kind of group, the group name without its number, so ct1 and ct2 both count as ct.
+        kind = {v.entity: run.security.group_of[v.entity].rstrip("0123456789") for v in security}
+        for k in sorted(set(kind.values())):
+            mine = [v for v in security if kind[v.entity] == k]
+            kpis[f"security_share_{k}"] = len(mine) / len(security)
+            kpis[f"security_wait_mean_{k}"] = float(np.mean([v.wait for v in mine]))
     return kpis
 
 
